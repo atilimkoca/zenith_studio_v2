@@ -1,0 +1,312 @@
+/* Approval modal uses the same base UI as RenewPackageModal with a few extra sections */
+.approval-modal {
+  max-width: 720px;
+}
+
+.approval-modal .modal-header {
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid var(--gray-100);
+  position: relative;
+}
+
+.approval-modal .close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 24px;
+  color: #64748b;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.approval-modal .close-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+  transform: scale(1.05);
+}
+
+.approval-modal .modal-content {
+  padding: 24px 32px 160px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  box-shadow: none;
+  animation: none;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.member-info-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  border: 2px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+  margin: 0 0 20px 0;
+}
+
+.member-info-card h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.member-info-card p {
+  margin: 2px 0;
+  font-size: 14px;
+  color: var(--gray-600);
+  line-height: 1.4;
+}
+
+.member-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--sage-green) 0%, var(--sage-dark) 100%);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chip-pending {
+  background: rgba(255, 193, 7, 0.15);
+  color: #a16207;
+}
+
+.approval-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin: 0;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.form-section h4 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-700);
+  letter-spacing: 0.01em;
+}
+
+.approval-modal .form-group input,
+.approval-modal .form-group select,
+.approval-modal .notes-input {
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--gray-900);
+  background: var(--white);
+  transition: all var(--transition-fast);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.approval-modal .form-group input:hover,
+.approval-modal .form-group select:hover,
+.approval-modal .notes-input:hover {
+  border-color: var(--sage-green);
+}
+
+.approval-modal .form-group input:focus,
+.approval-modal .form-group select:focus,
+.approval-modal .notes-input:focus {
+  outline: none;
+  border-color: var(--sage-green);
+  box-shadow: 0 0 0 3px rgba(107, 127, 106, 0.1);
+}
+
+.notes-input {
+  resize: vertical;
+  min-height: 90px;
+  line-height: 1.5;
+}
+
+/* Package option styles - matching RenewPackageModal exactly */
+.approval-modal .package-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--white);
+}
+
+.approval-modal .package-option:hover {
+  border-color: var(--sage-light);
+  background: var(--beige-light);
+}
+
+.approval-modal .package-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: var(--sage-green);
+}
+
+.approval-modal .package-option input[type="radio"]:checked + .option-content {
+  color: var(--sage-dark);
+}
+
+.approval-modal .package-option:has(input[type="radio"]:checked) {
+  border-color: var(--sage-green);
+  background: rgba(90, 107, 91, 0.1);
+}
+
+.approval-modal .package-option.selected {
+  border-color: var(--sage-green);
+  background: rgba(90, 107, 91, 0.1);
+}
+
+.option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.option-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-900);
+  line-height: 1.3;
+}
+
+.option-details {
+  font-size: 14px;
+  color: var(--gray-600);
+  font-weight: 500;
+}
+
+.option-description {
+  font-size: 13px;
+  color: var(--gray-500);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+/* Loading and no packages states */
+.loading-packages,
+.no-packages-warning {
+  padding: 16px;
+  text-align: center;
+  background: var(--beige-light);
+  border-radius: var(--radius-md);
+  color: var(--gray-600);
+  font-size: 14px;
+}
+
+.no-packages-warning {
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.no-packages-warning small {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.no-packages-warning a {
+  color: var(--sage-green);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+/* Modal actions */
+.approval-modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 32px 28px;
+  border-top: 2px solid var(--gray-100);
+  margin: 0;
+}
+
+.modal-actions .cancel-btn,
+.modal-actions .renew-btn {
+  min-width: 140px;
+  padding: 13px 28px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .approval-modal .modal-content {
+    padding: 16px 16px 140px;
+  }
+
+  .member-info-card {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}

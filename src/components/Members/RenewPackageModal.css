@@ -1,0 +1,264 @@
+/* Renew Package Modal Styles */
+.members-modal-overlay {
+  padding: 32px;
+}
+
+.renew-modal {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalSlideIn 0.3s ease-out;
+}
+
+.renew-modal .modal-header {
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid var(--gray-100);
+  position: relative;
+}
+
+.renew-modal .close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 24px;
+  color: #64748b;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.renew-modal .close-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+  transform: scale(1.05);
+}
+
+.renew-modal .modal-content {
+  padding: 24px 32px 32px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  box-shadow: none;
+  animation: none;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.package-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.package-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.package-options::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.package-options::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+}
+
+.package-options::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.package-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.package-option:hover {
+  border-color: var(--sage-light);
+  background: var(--beige-light);
+}
+
+.package-option input[type="radio"] {
+  margin: 0;
+}
+
+.package-option input[type="radio"]:checked + .option-content {
+  color: var(--sage-dark);
+}
+
+.package-option:has(input[type="radio"]:checked) {
+  border-color: var(--sage-green);
+  background: rgba(90, 107, 91, 0.1);
+}
+
+.package-option .checkmark {
+  color: var(--sage-green);
+  font-size: 20px;
+  font-weight: bold;
+  margin-left: auto;
+}
+
+.no-packages {
+  padding: 20px;
+  text-align: center;
+  color: var(--gray-600);
+  background: var(--beige-light);
+  border-radius: var(--radius-md);
+}
+
+.renew-btn {
+  background: linear-gradient(135deg, var(--sage-green) 0%, var(--sage-dark) 100%);
+  color: var(--white);
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 120px;
+}
+
+.renew-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.renew-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.cancel-btn {
+  background: var(--gray-100);
+  color: var(--gray-700);
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 100px;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  background: var(--gray-200);
+  color: var(--gray-800);
+}
+
+.cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Date Input Styles */
+.date-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--gray-900);
+  background: var(--white);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.date-input:hover {
+  border-color: var(--sage-green);
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--sage-green);
+  box-shadow: 0 0 0 3px rgba(107, 127, 106, 0.1);
+}
+
+.date-help-text {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--gray-600);
+  font-style: italic;
+}
+
+/* Modal actions */
+.renew-modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 32px 28px;
+  border-top: 2px solid var(--gray-100);
+  margin: 0;
+  flex-shrink: 0;
+  background: var(--white);
+}
+
+@media (max-width: 640px) {
+  .members-modal-overlay {
+    padding: 12px;
+    align-items: flex-start;
+  }
+
+  .members-modal-overlay .renew-modal {
+    width: 100%;
+    max-width: none;
+    height: calc(100vh - 24px);
+    max-height: none;
+    border-radius: var(--radius-md);
+  }
+
+  .renew-modal .modal-header {
+    padding: 20px 16px 16px;
+  }
+
+  .renew-modal .modal-content {
+    padding: 16px 16px 24px;
+  }
+
+  .renew-modal .modal-actions {
+    padding: 16px;
+    gap: 10px;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    flex-direction: column-reverse;
+  }
+
+  .renew-modal .cancel-btn,
+  .renew-modal .renew-btn {
+    width: 100%;
+  }
+}

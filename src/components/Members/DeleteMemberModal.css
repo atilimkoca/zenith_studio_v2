@@ -1,0 +1,262 @@
+.delete-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.delete-modal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 500px;
+  animation: slideIn 0.3s ease;
+  overflow: hidden;
+}
+
+.delete-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 24px 16px;
+  text-align: center;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-bottom: 1px solid #fecaca;
+}
+
+.delete-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.delete-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.delete-modal-body {
+  padding: 24px;
+}
+
+.member-info-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  border: 1px solid #e5e7eb;
+}
+
+.member-avatar-large {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.member-details {
+  flex: 1;
+}
+
+.member-name-large {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.member-email,
+.member-phone {
+  margin: 4px 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.delete-warning {
+  text-align: center;
+}
+
+.warning-message {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.warning-note {
+  margin: 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.5;
+  padding: 16px;
+  background: #fef3c7;
+  border-radius: 8px;
+  border-left: 4px solid #f59e0b;
+}
+
+.delete-modal-footer {
+  display: flex;
+  gap: 12px;
+  padding: 20px 24px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+}
+
+.delete-btn-cancel,
+.delete-btn-confirm {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.delete-btn-cancel {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.delete-btn-cancel:hover:not(:disabled) {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.delete-btn-confirm {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+}
+
+.delete-btn-confirm:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.delete-btn-cancel:disabled,
+.delete-btn-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.loading-spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .delete-modal {
+    margin: 20px;
+    width: calc(100% - 40px);
+  }
+  
+  .delete-modal-header {
+    padding: 24px 20px 12px;
+  }
+  
+  .delete-icon {
+    font-size: 40px;
+    width: 64px;
+    height: 64px;
+  }
+  
+  .delete-title {
+    font-size: 18px;
+  }
+  
+  .delete-modal-body {
+    padding: 20px;
+  }
+  
+  .member-info-card {
+    flex-direction: column;
+    text-align: center;
+    gap: 12px;
+  }
+  
+  .member-avatar-large {
+    align-self: center;
+  }
+  
+  .warning-message {
+    font-size: 14px;
+  }
+  
+  .warning-note {
+    font-size: 13px;
+  }
+  
+  .delete-modal-footer {
+    padding: 16px 20px;
+    flex-direction: column;
+  }
+  
+  .delete-btn-cancel,
+  .delete-btn-confirm {
+    width: 100%;
+  }
+}

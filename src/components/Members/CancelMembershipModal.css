@@ -1,0 +1,346 @@
+.cancel-membership-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.cancel-membership-modal {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.cancel-membership-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(135deg, #fee2e2 0%, #fef2f2 100%);
+  border-radius: 16px 16px 0 0;
+  position: relative;
+}
+
+.cancel-icon {
+  font-size: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 12px;
+}
+
+.cancel-title {
+  margin: 0;
+  color: #dc2626;
+  font-size: 24px;
+  font-weight: 700;
+  flex: 1;
+}
+
+.close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.cancel-membership-modal-body {
+  padding: 24px;
+}
+
+.member-info-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  border: 2px solid #e2e8f0;
+}
+
+.member-avatar-large {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 24px;
+  text-transform: uppercase;
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+}
+
+.member-details {
+  flex: 1;
+}
+
+.member-name-large {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.member-email, .member-phone {
+  margin: 4px 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.membership-info {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.membership-type, .remaining-classes {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.membership-type {
+  background: linear-gradient(135deg, #ddd6fe 0%, #e5e7eb 100%);
+  color: #5b21b6;
+}
+
+.remaining-classes {
+  background: linear-gradient(135deg, #dcfce7 0%, #f0fdf4 100%);
+  color: #15803d;
+}
+
+.cancel-form {
+  margin-bottom: 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #374151;
+  font-size: 14px;
+}
+
+.form-group textarea,
+.form-group input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-group textarea:focus,
+.form-group input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-group textarea:disabled,
+.form-group input:disabled {
+  background-color: #f9fafb;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.form-help {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.cancel-warning {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fef9e7 100%);
+  border: 2px solid #f59e0b;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+
+.warning-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.warning-content {
+  flex: 1;
+}
+
+.warning-message {
+  margin: 0 0 12px 0;
+  font-weight: 600;
+  color: #92400e;
+  font-size: 14px;
+}
+
+.warning-list {
+  margin: 0;
+  padding-left: 16px;
+  color: #92400e;
+  font-size: 13px;
+}
+
+.warning-list li {
+  margin-bottom: 4px;
+}
+
+.cancel-membership-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 24px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 0 0 16px 16px;
+}
+
+.btn-secondary {
+  padding: 12px 24px;
+  border: 2px solid #d1d5db;
+  background: white;
+  color: #374151;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.btn-danger {
+  padding: 12px 24px;
+  border: none;
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  color: white;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.btn-danger:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .cancel-membership-modal {
+    width: 95%;
+    max-height: 95vh;
+  }
+  
+  .cancel-membership-modal-header {
+    padding: 20px;
+  }
+  
+  .cancel-membership-modal-body {
+    padding: 20px;
+  }
+  
+  .member-info-card {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .member-avatar-large {
+    width: 60px;
+    height: 60px;
+    font-size: 20px;
+  }
+  
+  .member-name-large {
+    font-size: 20px;
+  }
+  
+  .cancel-membership-modal-footer {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .btn-secondary,
+  .btn-danger {
+    width: 100%;
+    justify-content: center;
+  }
+}
