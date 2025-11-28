@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "15a261c4-bbf3-48e8-8a44-67960730b728"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.zenithstudio.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}
