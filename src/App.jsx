@@ -17,9 +17,26 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext.jsx';
 import './App.css';
 
+const VALID_VIEWS = [
+  'dashboard',
+  'members',
+  'schedule',
+  'finance',
+  'trainers',
+  'equipment',
+  'reports',
+  'settings',
+  'referralCodes',
+  'packages'
+];
+
 
 function AppContent() {
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState(() => {
+    if (typeof window === 'undefined') return 'dashboard';
+    const storedView = localStorage.getItem('activeView');
+    return VALID_VIEWS.includes(storedView) ? storedView : 'dashboard';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { isAuthenticated, logout } = useAuth();
 
@@ -35,6 +52,13 @@ function AppContent() {
       window.removeEventListener('navigate-to-schedule', handleNavigateToSchedule);
     };
   }, []);
+
+  // Persist last visited view so refreshes stay on the same page
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeView', activeView);
+    }
+  }, [activeView]);
 
   const handleAuthSuccess = (authData) => {
     console.log('Authentication successful:', authData);
