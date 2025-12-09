@@ -15,6 +15,25 @@ import {
 import { db } from '../config/firebase';
 
 class ScheduleService {
+  normalizeDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+    if (value instanceof Timestamp) {
+      const date = value.toDate();
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    if (typeof value === 'object' && typeof value.seconds === 'number') {
+      const date = new Date(value.seconds * 1000);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    if (typeof value === 'string') {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    return null;
+  }
   
   // Create a new lesson
   async createLesson(lessonData) {
@@ -215,6 +234,7 @@ class ScheduleService {
     }
   }
 
+
   // Delete lesson
   async deleteLesson(lessonId) {
     try {
@@ -354,7 +374,8 @@ class ScheduleService {
         lesson.dayOfWeek,
         lesson.startTime,
         newEndTime,
-        lessonId
+        lessonId,
+        lesson.scheduledDate
       );
     } catch (error) {
       console.error('❌ Error checking lesson extension:', error);
@@ -366,7 +387,7 @@ class ScheduleService {
   }
 
   // Check for time conflicts
-  async checkTimeConflict(trainerId, dayOfWeek, startTime, endTime, excludeLessonId = null) {
+  async checkTimeConflict(trainerId, dayOfWeek, startTime, endTime, excludeLessonId = null, scheduledDate = null) {
     try {
 
       const lessonsCollection = collection(db, 'lessons');
@@ -383,18 +404,30 @@ class ScheduleService {
       }));
 
 
-      // Filter out the lesson being updated (if any)
-      let relevantLessons;
+      // Filter out the lesson being updated (if any) and constrain by date if provided
+      let relevantLessons = lessons;
+
+      if (scheduledDate) {
+        const targetDate = this.normalizeDate(scheduledDate);
+        if (targetDate) {
+          targetDate.setHours(0, 0, 0, 0);
+          relevantLessons = relevantLessons.filter((lesson) => {
+            const lessonDate = this.normalizeDate(lesson.scheduledDate);
+            if (!lessonDate) return false;
+            lessonDate.setHours(0, 0, 0, 0);
+            return lessonDate.getTime() === targetDate.getTime();
+          });
+        }
+      }
+
       if (excludeLessonId && excludeLessonId !== null && excludeLessonId !== undefined) {
-        relevantLessons = lessons.filter(lesson => {
+        relevantLessons = relevantLessons.filter(lesson => {
           // Convert both IDs to strings for comparison to handle any type differences
           const lessonIdStr = String(lesson.id).trim();
           const excludeIdStr = String(excludeLessonId).trim();
           const shouldExclude = lessonIdStr === excludeIdStr;
           return !shouldExclude;
         });
-      } else {
-        relevantLessons = lessons;
       }
 
 

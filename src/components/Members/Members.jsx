@@ -81,7 +81,7 @@ const getMembershipBadgeInfo = (member = {}) => {
 
 const Members = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('active');
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -545,22 +545,16 @@ const Members = () => {
         <div className="controls-right">
           <div className="filter-tabs">
             <button
-              className={`filter-tab ${filterStatus === 'all' ? 'active' : ''}`}
-              onClick={() => setFilterStatus('all')}
+              className={`filter-tab ${filterStatus === 'active' ? 'active' : ''}`}
+              onClick={() => setFilterStatus('active')}
             >
-              Tümü
+              Aktif
             </button>
             <button
               className={`filter-tab ${filterStatus === 'pending' ? 'active' : ''}`}
               onClick={() => setFilterStatus('pending')}
             >
               Bekleyenler
-            </button>
-            <button
-              className={`filter-tab ${filterStatus === 'active' ? 'active' : ''}`}
-              onClick={() => setFilterStatus('active')}
-            >
-              Aktif
             </button>
             <button
               className={`filter-tab ${filterStatus === 'inactive' ? 'active' : ''}`}

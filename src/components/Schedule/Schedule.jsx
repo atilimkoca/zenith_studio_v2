@@ -13,6 +13,7 @@ const Schedule = () => {
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [editingLesson, setEditingLesson] = useState(null);
   const [currentWeek, setCurrentWeek] = useState(new Date());
@@ -26,6 +27,14 @@ const Schedule = () => {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
   const isNavigatingRef = useRef(false); // Prevent reload during navigation
+  const [deleteCriteria, setDeleteCriteria] = useState({
+    dayOfWeek: '',
+    trainerId: '',
+    startTime: '',
+    duration: ''
+  });
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deletePreview, setDeletePreview] = useState(null);
   
   // Previous week data for comparison
   const [previousWeekData, setPreviousWeekData] = useState({
@@ -638,6 +647,7 @@ const Schedule = () => {
       price: 0,
       scheduledDate: scheduledDate
     });
+    // No multi-week apply for edits; treat each edit individually
     setShowCreateModal(true);
   };
 
@@ -708,6 +718,64 @@ const Schedule = () => {
     });
   };
 
+  const handleDeleteCriteriaChange = (field, value) => {
+    setDeleteCriteria(prev => ({ ...prev, [field]: value }));
+    setDeletePreview(null);
+  };
+
+  const computeDeletePreview = async () => {
+    if (!deleteCriteria.dayOfWeek && !deleteCriteria.trainerId && !deleteCriteria.startTime && !deleteCriteria.duration) {
+      showNotification('Lütfen en az bir koşul seçin (gün, saat, eğitmen veya süre).', 'warning');
+      return null;
+    }
+
+    const result = await scheduleService.getAllLessons();
+    if (!result.success) {
+      showNotification('Dersler alınamadı, lütfen tekrar deneyin.', 'error');
+      return null;
+    }
+
+    const matches = (result.lessons || []).filter((lesson) => {
+      const dayMatch = !deleteCriteria.dayOfWeek || lesson.dayOfWeek === deleteCriteria.dayOfWeek;
+      const trainerMatch = !deleteCriteria.trainerId || lesson.trainerId === deleteCriteria.trainerId;
+      const startMatch = !deleteCriteria.startTime || lesson.startTime === deleteCriteria.startTime;
+      const durationMatch = !deleteCriteria.duration || String(lesson.duration) === String(deleteCriteria.duration);
+      return dayMatch && trainerMatch && startMatch && durationMatch;
+    });
+
+    setDeletePreview({
+      count: matches.length,
+      sample: matches.slice(0, 5).map((m) => `${daysOfWeek[m.dayOfWeek] || m.dayOfWeek} • ${m.startTime}-${m.endTime} • ${m.title}`),
+    });
+
+    return matches;
+  };
+
+  const handleDeleteLessons = async () => {
+    try {
+      setDeleteLoading(true);
+      const matches = await computeDeletePreview();
+      if (!matches || matches.length === 0) {
+        setDeleteLoading(false);
+        return;
+      }
+
+      for (const lesson of matches) {
+        await scheduleService.deleteLesson(lesson.id);
+      }
+
+      showNotification(`${matches.length} ders silindi.`, 'success');
+      setShowDeleteModal(false);
+      setDeletePreview(null);
+      loadScheduleData();
+    } catch (error) {
+      console.error('Error bulk deleting lessons:', error);
+      showNotification('Dersler silinirken bir hata oluştu.', 'error');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const handleRecurringFormChange = (field, value) => {
     setRecurringForm(prev => {
       const updated = { ...prev, [field]: value };
@@ -746,6 +814,11 @@ const Schedule = () => {
 
       return updated;
     });
+  };
+
+  const closeLessonModal = () => {
+    setShowCreateModal(false);
+    setEditingLesson(null);
   };
 
   const handleDayToggle = (day) => {
@@ -1025,7 +1098,8 @@ const Schedule = () => {
             lessonForm.dayOfWeek,
             lessonForm.startTime,
             lessonForm.endTime,
-            editingLesson?.id
+            editingLesson?.id,
+            lessonForm.scheduledDate
           );
         }
 
@@ -1052,7 +1126,7 @@ const Schedule = () => {
           editingLesson ? 'Ders başarıyla güncellendi.' : 'Ders başarıyla oluşturuldu.',
           'success'
         );
-        setShowCreateModal(false);
+        closeLessonModal();
         loadScheduleData();
       } else {
         showNotification(result.error, 'error');
@@ -1130,17 +1204,17 @@ const Schedule = () => {
           } else {
             console.log('❌ Member lookup failed for:', participantId);
             details[participantId] = {
-              name: `ID: ${participantId.substring(0, 12)}...`,
-              email: 'Üye bulunamadı - ID eşleşmiyor',
-              phone: 'Üye verisi bulunamadı'
+              name: 'Bilinmeyen katılımcı',
+              email: 'Üye bulunamadı',
+              phone: '—'
             };
           }
         } catch (error) {
           console.error('💥 Exception while fetching member:', participantId, error);
           details[participantId] = {
-            name: `Hata: ${participantId.substring(0, 8)}...`,
-            email: `Error: ${error.message}`,
-            phone: 'Veri getirme hatası'
+            name: 'Bilinmeyen katılımcı',
+            email: 'Veri getirme hatası',
+            phone: '—'
           };
         }
       }
@@ -1666,6 +1740,23 @@ const Schedule = () => {
             </svg>
             Sınıf Ekle
           </button>
+          <button 
+            className="btn btn-danger" 
+            onClick={() => {
+              setDeleteCriteria({ dayOfWeek: '', trainerId: '', startTime: '', duration: '' });
+              setDeletePreview(null);
+              setShowDeleteModal(true);
+            }}
+            style={{ marginRight: '12px' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18"/>
+              <path d="M8 6V4h8v2"/>
+              <path d="M10 11v6"/>
+              <path d="M14 11v6"/>
+            </svg>
+            Ders Sil
+          </button>
           <button className="btn btn-secondary" onClick={loadScheduleData}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
@@ -2002,7 +2093,7 @@ const Schedule = () => {
               <h2>{editingLesson ? 'Ders Düzenle' : 'Ders Oluştur'}</h2>
               <button 
                 className="modal-close"
-                onClick={() => setShowCreateModal(false)}
+                onClick={closeLessonModal}
               >
                 ×
               </button>
@@ -2190,7 +2281,7 @@ const Schedule = () => {
               <div className="modal-actions">
                 <button 
                   className="btn btn-secondary"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={closeLessonModal}
                 >
                   İptal
                 </button>
@@ -2466,6 +2557,122 @@ const Schedule = () => {
         </div>
       )}
 
+      {/* Delete Lessons Modal */}
+      {showDeleteModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <h2>Ders Sil (Koşullu)</h2>
+              <button 
+                className="modal-close"
+                onClick={() => setShowDeleteModal(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Gün</label>
+                  <select
+                    value={deleteCriteria.dayOfWeek}
+                    onChange={(e) => handleDeleteCriteriaChange('dayOfWeek', e.target.value)}
+                  >
+                    <option value="">Hepsi</option>
+                    {Object.entries(daysOfWeek).map(([day, label]) => (
+                      <option key={day} value={day}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Başlangıç Saati</label>
+                  <select
+                    value={deleteCriteria.startTime}
+                    onChange={(e) => handleDeleteCriteriaChange('startTime', e.target.value)}
+                  >
+                    <option value="">Hepsi</option>
+                    {timeSlots.map(time => (
+                      <option key={time} value={time}>{time}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Eğitmen</label>
+                  <select
+                    value={deleteCriteria.trainerId}
+                    onChange={(e) => handleDeleteCriteriaChange('trainerId', e.target.value)}
+                  >
+                    <option value="">Hepsi</option>
+                    {trainers.map(trainer => (
+                      <option key={trainer.id} value={trainer.id}>
+                        {trainer.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Süre (dk)</label>
+                  <input
+                    type="number"
+                    value={deleteCriteria.duration}
+                    onChange={(e) => handleDeleteCriteriaChange('duration', e.target.value)}
+                    min="1"
+                    placeholder="Örn: 60"
+                  />
+                </div>
+              </div>
+
+              {deletePreview && (
+                <div className="info-box">
+                  <strong>{deletePreview.count}</strong> ders silinecek.
+                  {deletePreview.sample.length > 0 && (
+                    <ul style={{ marginTop: '8px', paddingLeft: '18px', color: 'var(--gray-700)' }}>
+                      {deletePreview.sample.map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                      {deletePreview.count > deletePreview.sample.length && (
+                        <li>...ve diğerleri</li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              <div className="modal-actions" style={{ marginTop: '12px' }}>
+                <button 
+                  className="btn btn-secondary"
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={deleteLoading}
+                >
+                  İptal
+                </button>
+                <button 
+                  className="btn btn-warning"
+                  onClick={computeDeletePreview}
+                  disabled={deleteLoading}
+                  style={{ color: '#4a4a4a', background: '#f8e1a5' }}
+                >
+                  Eşleşmeleri Önizle
+                </button>
+                <button 
+                  className="btn btn-danger"
+                  onClick={handleDeleteLessons}
+                  disabled={deleteLoading}
+                >
+                  {deleteLoading ? 'Siliniyor...' : 'Eşleşen Dersleri Sil'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Lesson Detail Modal */}
       {showLessonDetail && selectedLessonForDetail && (
         <div className="modal-overlay">
@@ -2632,7 +2839,7 @@ const Schedule = () => {
                                 color: 'var(--text-light)',
                                 fontStyle: 'italic'
                               }}>
-                                ID: {participantId}
+                                Bilgi getirilemedi
                               </div>
                             )}
                           </div>

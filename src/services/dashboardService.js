@@ -4,11 +4,16 @@ import {
   getDocs, 
   addDoc,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  query,
+  where
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 class DashboardService {
+  constructor() {
+    this.EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+  }
   
   // Get dashboard statistics
   async getDashboardStats() {
@@ -79,7 +84,12 @@ class DashboardService {
       });
       
       // Simple customer count: if role === 'customer', count it
-      const customerMembers = allData.filter(item => item.role === 'customer');
+      // Exclude permanently deleted members to match the Üyeler page count
+      const customerMembers = allData.filter(item =>
+        item.role === 'customer' &&
+        item.status !== 'permanently_deleted' &&
+        item.membershipStatus !== 'deleted'
+      );
       
       // Fetch lessons for today
       const todayLessons = await this.getTodayLessons();
@@ -966,27 +976,139 @@ class DashboardService {
     return `${diffInDays} gün önce`;
   }
   
-  // Send notification (placeholder for now)
+  // Send notification
+  // Push notifications are handled by Firebase Cloud Function (triggered on Firestore write)
   async sendNotification(notificationData) {
     try {
-      // Add notification to Firestore
+      const notificationId = `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const { title, message, type = 'general', recipients = 'all' } = notificationData;
+
+      console.log('📤 Sending notification:', { title, message, type, recipients });
+
+      // Save to Firestore - Cloud Function will automatically send push notifications
       const notificationDoc = {
         ...notificationData,
+        notificationId,
+        title,
+        message,
+        type,
+        recipients,
         createdAt: serverTimestamp(),
-        status: 'sent'
+        status: 'pending',
+        source: 'web-admin',
+        pushSent: false  // Cloud Function will update this
       };
-      
-      await addDoc(collection(db, 'notifications'), notificationDoc);
-      
+
+      const docRef = await addDoc(collection(db, 'notifications'), notificationDoc);
+      console.log('✅ Notification saved to Firestore:', docRef.id);
+      console.log('📬 Cloud Function will handle push delivery automatically');
+
       return {
         success: true,
-        message: 'Bildirim başarıyla gönderildi'
+        message: 'Bildirim gönderildi! Push bildirimi otomatik olarak gönderilecek.',
+        notificationId: docRef.id
       };
     } catch (error) {
+      console.error('❌ Error saving notification:', error);
       return {
         success: false,
         error: 'Bildirim gönderilirken hata oluştu'
       };
+    }
+  }
+
+  // Fetch Expo push tokens for recipients
+  async getPushTokens(recipientFilter = 'all') {
+    try {
+      // First, get ALL users to debug
+      const allUsersSnapshot = await getDocs(collection(db, 'users'));
+      console.log('👥 Total users in database:', allUsersSnapshot.size);
+
+      // Log each user's notification status
+      allUsersSnapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        console.log(`  User ${docSnap.id}:`, {
+          hasToken: !!data.pushToken,
+          token: data.pushToken ? data.pushToken.substring(0, 30) + '...' : 'none',
+          notificationsEnabled: data.notificationsEnabled,
+          status: data.status
+        });
+      });
+
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('notificationsEnabled', '==', true)
+      );
+
+      const snapshot = await getDocs(usersQuery);
+      console.log('✅ Users with notificationsEnabled=true:', snapshot.size);
+
+      const tokens = [];
+      const seen = new Set();
+
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        const token = data.pushToken;
+
+        if (!token || seen.has(token)) return;
+
+        // Basic filtering by status if available
+        if (recipientFilter === 'active' && data.status && data.status !== 'approved' && data.status !== 'active') return;
+        if (recipientFilter === 'pending' && data.status && data.status !== 'pending') return;
+
+        seen.add(token);
+        tokens.push(token);
+      });
+
+      return tokens;
+    } catch (error) {
+      console.error('❌ Failed to get push tokens:', error);
+      return [];
+    }
+  }
+
+  // Send push notifications via Expo Push API
+  async sendPushNotifications(pushTokens, notification) {
+    try {
+      if (!notification?.title || !notification?.message) {
+        return { success: false, error: 'Missing title or message' };
+      }
+
+      const messages = pushTokens.map(token => ({
+        to: token,
+        title: String(notification.title),
+        body: String(notification.message),
+        data: {
+          notificationId: notification.id,
+          type: notification.type || 'general',
+          source: 'fcm-push'
+        },
+        sound: 'default',
+        badge: 1,
+        priority: 'high'
+      }));
+
+      const response = await fetch(this.EXPO_PUSH_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(messages)
+      });
+
+      const result = await response.json();
+      const success = response.ok && !result?.errors;
+
+      if (!success) {
+        console.error('❌ Expo push send failed:', result);
+      }
+
+      return { success, result };
+    } catch (error) {
+      console.error('❌ Error sending push notifications:', error);
+      return { success: false, error: error.message };
     }
   }
 
