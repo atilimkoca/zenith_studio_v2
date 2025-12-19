@@ -634,7 +634,8 @@ class MemberService {
             durationInMonths = Number(packageData.duration) || 1;
 
             const packageClasses = packageData.classes ?? packageData.lessonCount ?? packageData.lessons ?? packageData.sessions;
-            if (!Number.isFinite(classCount) || classCount <= 0) {
+            // Only override if classCount is NaN or negative, NOT if it's 0 (0 is valid - user used all credits)
+            if (!Number.isFinite(classCount) || classCount < 0) {
               classCount = Number(packageClasses);
             }
           }

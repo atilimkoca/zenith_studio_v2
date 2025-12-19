@@ -645,7 +645,8 @@ const Schedule = () => {
       description: '',
       level: 'beginner',
       price: 0,
-      scheduledDate: scheduledDate
+      scheduledDate: scheduledDate,
+      lessonType: 'group'
     });
     // No multi-week apply for edits; treat each edit individually
     setShowCreateModal(true);
@@ -677,7 +678,8 @@ const Schedule = () => {
       description: lesson.description || '',
       level: lesson.level || 'beginner',
       price: lesson.price || 0,
-      scheduledDate: lesson.scheduledDate || null
+      scheduledDate: lesson.scheduledDate || null,
+      lessonType: lesson.lessonType || 'group'
     });
     setShowCreateModal(true);
   };
@@ -895,7 +897,8 @@ const Schedule = () => {
           isRecurring: true,
           recurringSeriesId: `series_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           weekNumber: week + 1,
-          totalWeeks: weeksToGenerate
+          totalWeeks: weeksToGenerate,
+          lessonType: recurringForm.lessonType || 'group'
         };
         lessons.push(lessonData);
       }
@@ -924,7 +927,8 @@ const Schedule = () => {
       level: 'beginner',
       startDate: today.toISOString().split('T')[0],
       endDate: endDateCalc.toISOString().split('T')[0],
-      repeatWeeks: 4
+      repeatWeeks: 4,
+      lessonType: 'group'
     });
     setShowRecurringModal(true);
   };
