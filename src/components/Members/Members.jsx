@@ -506,14 +506,17 @@ const Members = () => {
     if (filterStatus === 'pending') {
       matchesStatus = member.status === 'pending';
     } else if (filterStatus === 'active') {
-      // More flexible active status check
-      matchesStatus = member.status === 'approved' || 
+      // More flexible active status check - exclude frozen members
+      matchesStatus = (member.status === 'approved' || 
                       member.membershipStatus === 'active' ||
-                      (!member.status && member.membershipStatus !== 'inactive' && member.membershipStatus !== 'cancelled');
+                      (!member.status && member.membershipStatus !== 'inactive' && member.membershipStatus !== 'cancelled')) &&
+                      member.membershipStatus !== 'frozen' && member.status !== 'frozen';
     } else if (filterStatus === 'inactive') {
       matchesStatus = member.membershipStatus === 'inactive' || 
                       member.membershipStatus === 'cancelled' ||
                       member.status === 'rejected';
+    } else if (filterStatus === 'frozen') {
+      matchesStatus = member.membershipStatus === 'frozen' || member.status === 'frozen';
     }
     
     return matchesSearch && matchesStatus;
@@ -530,7 +533,8 @@ const Members = () => {
             Toplam {members.filter(m => m.status !== 'permanently_deleted').length} üye
             {filterStatus !== 'all' && ` • ${filteredMembers.length} ${
               filterStatus === 'pending' ? 'bekleyen' : 
-              filterStatus === 'active' ? 'aktif' : 'pasif'
+              filterStatus === 'active' ? 'aktif' : 
+              filterStatus === 'frozen' ? 'dondurulmuş' : 'pasif'
             } üye`}
           </p>
         </div>
@@ -569,6 +573,12 @@ const Members = () => {
               onClick={() => setFilterStatus('inactive')}
             >
               Pasif
+            </button>
+            <button
+              className={`filter-tab frozen ${filterStatus === 'frozen' ? 'active' : ''}`}
+              onClick={() => setFilterStatus('frozen')}
+            >
+              ❄️ Dondurulmuş
             </button>
           </div>
 

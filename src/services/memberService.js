@@ -1728,13 +1728,13 @@ class MemberService {
     }
   }
 
-  // Silent automatic check for expired packages (no console logs)
+  // Silent automatic check for expired packages and frozen memberships (no console logs)
   async autoCheckExpiredPackages() {
     try {
       const today = new Date();
       const processedMembers = [];
 
-      // Check both collections for expired packages
+      // Check both collections for expired packages and frozen memberships
       const [membersSnapshot, usersSnapshot] = await Promise.all([
         getDocs(collection(db, this.membersCollection)),
         getDocs(collection(db, 'users'))
@@ -1744,6 +1744,8 @@ class MemberService {
       for (const doc of membersSnapshot.docs) {
         const memberData = doc.data();
         await this.processExpiredMemberSilent(doc.id, memberData, today, 'members');
+        // Check for expired freeze
+        await this.autoUnfreezeIfExpired(doc.id, memberData, today);
         processedMembers.push(doc.id);
       }
 
@@ -1752,11 +1754,49 @@ class MemberService {
         if (!processedMembers.includes(doc.id)) {
           const userData = doc.data();
           await this.processExpiredMemberSilent(doc.id, userData, today, 'users');
+          // Check for expired freeze
+          await this.autoUnfreezeIfExpired(doc.id, userData, today);
         }
       }
     } catch (error) {
       // Silent fail - don't disrupt normal operations
       console.error('Silent package check error:', error);
+    }
+  }
+
+  // Auto-unfreeze members whose freeze end date has passed
+  async autoUnfreezeIfExpired(memberId, memberData, today) {
+    try {
+      // Only process frozen members
+      if (memberData.membershipStatus !== 'frozen' && memberData.status !== 'frozen') {
+        return false;
+      }
+
+      // Check if freeze end date has passed
+      const freezeEndDate = parseDateValue(memberData.freezeEndDate);
+      if (!freezeEndDate) {
+        return false;
+      }
+
+      // Normalize dates for comparison (compare end of freeze day)
+      const normalizedFreezeEnd = new Date(freezeEndDate);
+      normalizedFreezeEnd.setHours(23, 59, 59, 999);
+      
+      const normalizedToday = new Date(today);
+      normalizedToday.setHours(0, 0, 0, 0);
+
+      // If freeze end date has passed, auto-unfreeze
+      if (normalizedFreezeEnd < normalizedToday) {
+        console.log(`🔄 Auto-unfreezing member ${memberData.displayName || memberData.firstName} - freeze period ended`);
+        await this.unfreezeMembership(memberId, 'system-auto', { reason: 'Dondurma süresi doldu - Otomatik aktifleştirildi' });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      // Silent fail
+      console.error(`Error auto-unfreezing member ${memberId}:`, error);
+      return false;
     }
   }
 
