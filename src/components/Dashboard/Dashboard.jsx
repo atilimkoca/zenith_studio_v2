@@ -28,6 +28,13 @@ const Dashboard = () => {
   const [dailyAttendance, setDailyAttendance] = useState([0, 0, 0, 0, 0, 0, 0]);
   const [monthlyAttendance, setMonthlyAttendance] = useState([0, 0, 0, 0]);
   
+  // Participant statistics by lesson type
+  const [participantStats, setParticipantStats] = useState({
+    today: { group: 0, oneOnOne: 0, total: 0 },
+    thisWeek: { group: 0, oneOnOne: 0, total: 0 },
+    thisMonth: { group: 0, oneOnOne: 0, total: 0 }
+  });
+  
   // Trainer statistics states
   const [individualTrainers, setIndividualTrainers] = useState([]);
   
@@ -65,7 +72,8 @@ const Dashboard = () => {
         trainerStatsResult,
         attendance,
         daily,
-        monthly
+        monthly,
+        participantStatsResult
       ] = await Promise.all([
         dashboardService.getDashboardStats(),
         dashboardService.getTodayLessons(),
@@ -73,7 +81,8 @@ const Dashboard = () => {
         dashboardService.getIndividualTrainerStats(),
         dashboardService.getWeeklyAttendance(),
         dashboardService.getDailyAttendance(),
-        dashboardService.getMonthlyAttendance()
+        dashboardService.getMonthlyAttendance(),
+        dashboardService.getParticipantStatsByType()
       ]);
       
       // Update states with results
@@ -91,6 +100,10 @@ const Dashboard = () => {
       
       if (trainerStatsResult.success) {
         setIndividualTrainers(trainerStatsResult.data);
+      }
+      
+      if (participantStatsResult.success) {
+        setParticipantStats(participantStatsResult.data);
       }
       
     } catch {
@@ -315,6 +328,111 @@ const Dashboard = () => {
         ))}
       </div>
 
+      {/* Participant Statistics by Lesson Type Section */}
+      <div className="participant-type-stats-section">
+        <div className="section-header">
+          <h2 className="section-title">Katılımcı İstatistikleri</h2>
+          <div className="stats-summary">
+            <span className="summary-label">Ders Tipine Göre Dağılım</span>
+          </div>
+        </div>
+        
+        <div className="participant-type-grid">
+          {/* Today Stats */}
+          <div className="participant-type-card">
+            <div className="type-card-header">
+              <span className="type-card-icon">📅</span>
+              <h3 className="type-card-title">Bugün</h3>
+            </div>
+            <div className="type-stats-row">
+              <div className="type-stat group-stat">
+                <span className="type-stat-icon">👥</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.today.group}</span>
+                  <span className="type-stat-label">Grup</span>
+                </div>
+              </div>
+              <div className="type-stat individual-stat">
+                <span className="type-stat-icon">👤</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.today.oneOnOne}</span>
+                  <span className="type-stat-label">Bireysel</span>
+                </div>
+              </div>
+              <div className="type-stat total-stat">
+                <span className="type-stat-icon">📊</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.today.total}</span>
+                  <span className="type-stat-label">Toplam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* This Week Stats */}
+          <div className="participant-type-card">
+            <div className="type-card-header">
+              <span className="type-card-icon">📆</span>
+              <h3 className="type-card-title">Bu Hafta</h3>
+            </div>
+            <div className="type-stats-row">
+              <div className="type-stat group-stat">
+                <span className="type-stat-icon">👥</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisWeek.group}</span>
+                  <span className="type-stat-label">Grup</span>
+                </div>
+              </div>
+              <div className="type-stat individual-stat">
+                <span className="type-stat-icon">👤</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisWeek.oneOnOne}</span>
+                  <span className="type-stat-label">Bireysel</span>
+                </div>
+              </div>
+              <div className="type-stat total-stat">
+                <span className="type-stat-icon">📊</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisWeek.total}</span>
+                  <span className="type-stat-label">Toplam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* This Month Stats */}
+          <div className="participant-type-card">
+            <div className="type-card-header">
+              <span className="type-card-icon">🗓️</span>
+              <h3 className="type-card-title">Bu Ay</h3>
+            </div>
+            <div className="type-stats-row">
+              <div className="type-stat group-stat">
+                <span className="type-stat-icon">👥</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisMonth.group}</span>
+                  <span className="type-stat-label">Grup</span>
+                </div>
+              </div>
+              <div className="type-stat individual-stat">
+                <span className="type-stat-icon">👤</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisMonth.oneOnOne}</span>
+                  <span className="type-stat-label">Bireysel</span>
+                </div>
+              </div>
+              <div className="type-stat total-stat">
+                <span className="type-stat-icon">📊</span>
+                <div className="type-stat-content">
+                  <span className="type-stat-value">{participantStats.thisMonth.total}</span>
+                  <span className="type-stat-label">Toplam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Individual Trainer Statistics Section */}
       <div className="trainer-stats-section">
         <div className="section-header">
@@ -357,6 +475,10 @@ const Dashboard = () => {
                       <span className="metric-primary">{trainer.dailyUniqueStudents}</span>
                       <span className="metric-secondary">katılımcı</span>
                     </div>
+                    <div className="metric-type-breakdown">
+                      <span className="type-group">👥 {trainer.dailyGroupParticipants || 0}</span>
+                      <span className="type-one-on-one">👤 {trainer.dailyOneOnOneParticipants || 0}</span>
+                    </div>
                   </div>
                   
                   <div className="metric-group">
@@ -367,6 +489,10 @@ const Dashboard = () => {
                       <span className="metric-primary">{trainer.weeklyUniqueStudents}</span>
                       <span className="metric-secondary">katılımcı</span>
                     </div>
+                    <div className="metric-type-breakdown">
+                      <span className="type-group">👥 {trainer.weeklyGroupParticipants || 0}</span>
+                      <span className="type-one-on-one">👤 {trainer.weeklyOneOnOneParticipants || 0}</span>
+                    </div>
                   </div>
                   
                   <div className="metric-group">
@@ -376,6 +502,10 @@ const Dashboard = () => {
                       <span className="metric-secondary">ders</span>
                       <span className="metric-primary">{trainer.monthlyUniqueStudents}</span>
                       <span className="metric-secondary">katılımcı</span>
+                    </div>
+                    <div className="metric-type-breakdown">
+                      <span className="type-group">👥 {trainer.monthlyGroupParticipants || 0}</span>
+                      <span className="type-one-on-one">👤 {trainer.monthlyOneOnOneParticipants || 0}</span>
                     </div>
                   </div>
                 </div>

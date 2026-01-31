@@ -436,19 +436,27 @@ const Members = () => {
     try {
       setIsProcessing(true);
 
-      const result = await memberService.renewPackage(userId, packageId, startDate);
+      // Use addPackageToUser to add a new package (multi-package support)
+      const result = await memberService.addPackageToUser(
+        userId,
+        {
+          packageId: packageId,
+          startDate: startDate
+        },
+        currentUser?.uid || 'admin'
+      );
 
       if (result.success) {
         await loadMembers();
         setRenewModalOpen(false);
         setSelectedMember(null);
-        showSuccess(result.message || 'Paket başarıyla yenilendi');
+        showSuccess(result.message || `Paket başarıyla eklendi. Toplam ${result.totalPackages} paket.`);
       } else {
         showError(`Hata: ${result.error}`);
       }
     } catch (err) {
-      console.error('Error renewing package:', err);
-      showError('Paket yenilenirken bir hata oluştu');
+      console.error('Error adding package:', err);
+      showError('Paket eklenirken bir hata oluştu');
     } finally {
       setIsProcessing(false);
     }

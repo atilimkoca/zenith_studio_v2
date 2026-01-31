@@ -998,6 +998,33 @@
   text-transform: lowercase;
 }
 
+/* Trainer metric type breakdown */
+.metric-type-breakdown {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--gray-200);
+  font-size: 13px;
+}
+
+.metric-type-breakdown .type-group {
+  color: var(--sage-green);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metric-type-breakdown .type-one-on-one {
+  color: var(--primary-orange);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Empty State */
 .empty-trainers-message {
   text-align: center;
@@ -1012,4 +1039,179 @@
   margin: 0;
   font-size: 16px;
   font-style: italic;
+}
+
+/* Participant Type Statistics Styles */
+.participant-type-stats-section {
+  margin: 32px 0;
+  animation: fadeInUp 0.6s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.participant-type-stats-section .section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding: 0 8px;
+}
+
+.participant-type-stats-section .summary-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sage-green);
+  background: var(--beige-light);
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--sage-green);
+}
+
+.participant-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+}
+
+.participant-type-card {
+  background: var(--white);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--gray-200);
+  transition: all 0.3s ease;
+}
+
+.participant-type-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+}
+
+.type-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--gray-100);
+}
+
+.type-card-icon {
+  font-size: 28px;
+}
+
+.type-card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--sage-dark);
+  margin: 0;
+}
+
+.type-stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.type-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  padding: 16px 12px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.type-stat:hover {
+  transform: scale(1.05);
+}
+
+.type-stat.group-stat {
+  background: linear-gradient(135deg, rgba(90, 107, 91, 0.1), rgba(90, 107, 91, 0.05));
+  border: 1px solid rgba(90, 107, 91, 0.2);
+}
+
+.type-stat.individual-stat {
+  background: linear-gradient(135deg, rgba(180, 212, 200, 0.3), rgba(180, 212, 200, 0.15));
+  border: 1px solid rgba(180, 212, 200, 0.5);
+}
+
+.type-stat.total-stat {
+  background: linear-gradient(135deg, rgba(212, 184, 150, 0.2), rgba(212, 184, 150, 0.1));
+  border: 1px solid rgba(212, 184, 150, 0.4);
+}
+
+.type-stat-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.type-stat-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.type-stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--sage-dark);
+}
+
+.type-stat-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Responsive Design for Participant Type Stats */
+@media (max-width: 1024px) {
+  .participant-type-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .participant-type-card:last-child {
+    grid-column: span 2;
+    max-width: 50%;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .participant-type-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .participant-type-card:last-child {
+    grid-column: span 1;
+    max-width: 100%;
+  }
+  
+  .type-stats-row {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .type-stat {
+    min-width: 80px;
+  }
+  
+  .type-stat-value {
+    font-size: 24px;
+  }
+  
+  .type-card-header {
+    justify-content: center;
+  }
+  
+  .participant-type-stats-section .section-header {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
 }

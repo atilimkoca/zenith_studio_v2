@@ -10,6 +10,33 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
+// Helper function to safely parse date values
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (value instanceof Timestamp || (typeof value === 'object' && typeof value.toDate === 'function')) {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value === 'string') {
+    // Handle date-only strings (e.g., "2026-01-07") by parsing as local time
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+};
+
 class DashboardService {
   constructor() {
     this.EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -666,15 +693,9 @@ class DashboardService {
           if (!lesson.scheduledDate || lesson.status === 'deleted' || lesson.status === 'cancelled') return false;
           
           try {
-            // Handle different date formats
-            let lessonDate;
-            if (lesson.scheduledDate.toDate) {
-              lessonDate = lesson.scheduledDate.toDate();
-            } else if (typeof lesson.scheduledDate === 'string') {
-              lessonDate = new Date(lesson.scheduledDate);
-            } else {
-              return false;
-            }
+            // Handle different date formats using parseDateValue helper
+            const lessonDate = parseDateValue(lesson.scheduledDate);
+            if (!lessonDate) return false;
             
             return lessonDate >= dayStart && lessonDate < dayEnd;
           } catch {
@@ -725,12 +746,8 @@ class DashboardService {
               if (!lesson.scheduledDate || lesson.status === 'deleted' || lesson.status === 'cancelled') return false;
               
               try {
-                let lessonDate;
-                if (lesson.scheduledDate.toDate) {
-                  lessonDate = lesson.scheduledDate.toDate();
-                } else {
-                  lessonDate = new Date(lesson.scheduledDate);
-                }
+                const lessonDate = parseDateValue(lesson.scheduledDate);
+                if (!lessonDate) return false;
                 return lessonDate >= dayStart && lessonDate < dayEnd;
               } catch {
                 return false;
@@ -795,15 +812,12 @@ class DashboardService {
         // Method 1: Check lessons with specific scheduled dates for TODAY
         if (lesson.scheduledDate) {
           try {
-            let lessonDate;
-            if (lesson.scheduledDate.toDate) {
-              lessonDate = lesson.scheduledDate.toDate();
-            } else {
-              lessonDate = new Date(lesson.scheduledDate);
-            }
-            const isToday = lessonDate >= todayStart && lessonDate < todayEnd;
-            if (isToday) {
-              return true;
+            const lessonDate = parseDateValue(lesson.scheduledDate);
+            if (lessonDate) {
+              const isToday = lessonDate >= todayStart && lessonDate < todayEnd;
+              if (isToday) {
+                return true;
+              }
             }
           } catch {
             // Skip invalid dates
@@ -909,12 +923,8 @@ class DashboardService {
           if (!lesson.scheduledDate || lesson.status === 'deleted' || lesson.status === 'cancelled') return false;
           
           try {
-            let lessonDate;
-            if (lesson.scheduledDate.toDate) {
-              lessonDate = lesson.scheduledDate.toDate();
-            } else {
-              lessonDate = new Date(lesson.scheduledDate);
-            }
+            const lessonDate = parseDateValue(lesson.scheduledDate);
+            if (!lessonDate) return false;
             return lessonDate >= weekStart && lessonDate < weekEnd;
           } catch {
             return false;
@@ -1179,16 +1189,22 @@ class DashboardService {
           dailyLessons: 0,
           dailyAttendance: 0,
           dailyUniqueStudents: new Set(),
+          dailyGroupParticipants: 0,
+          dailyOneOnOneParticipants: 0,
           
           // Weekly stats  
           weeklyLessons: 0,
           weeklyAttendance: 0,
           weeklyUniqueStudents: new Set(),
+          weeklyGroupParticipants: 0,
+          weeklyOneOnOneParticipants: 0,
           
           // Monthly stats
           monthlyLessons: 0,
           monthlyAttendance: 0,
           monthlyUniqueStudents: new Set(),
+          monthlyGroupParticipants: 0,
+          monthlyOneOnOneParticipants: 0,
           
           // Performance metrics
           rating: trainer.rating || 0,
@@ -1233,20 +1249,45 @@ class DashboardService {
           const attendees = lesson.attendees || [];
           const attendeeCount = lesson.attendeeCount || Math.max(participants.length, attendees.length) || 0;
 
+          // Determine if this is a group or one-on-one lesson
+          const isOneOnOne = lesson.lessonType === 'one-on-one' || 
+                             lesson.lessonType === 'bireysel' ||
+                             lesson.packageType === 'one-on-one' ||
+                             lesson.packageType === 'bireysel' ||
+                             lesson.maxParticipants === 1;
+
           if (isToday) {
             stats.dailyAttendance += attendeeCount;
             participants.forEach(p => stats.dailyUniqueStudents.add(p));
             attendees.forEach(p => stats.dailyUniqueStudents.add(p));
+            // Track by lesson type
+            if (isOneOnOne) {
+              stats.dailyOneOnOneParticipants += attendeeCount;
+            } else {
+              stats.dailyGroupParticipants += attendeeCount;
+            }
           }
           if (isThisWeek) {
             stats.weeklyAttendance += attendeeCount;
             participants.forEach(p => stats.weeklyUniqueStudents.add(p));
             attendees.forEach(p => stats.weeklyUniqueStudents.add(p));
+            // Track by lesson type
+            if (isOneOnOne) {
+              stats.weeklyOneOnOneParticipants += attendeeCount;
+            } else {
+              stats.weeklyGroupParticipants += attendeeCount;
+            }
           }
           if (isThisMonth) {
             stats.monthlyAttendance += attendeeCount;
             participants.forEach(p => stats.monthlyUniqueStudents.add(p));
             attendees.forEach(p => stats.monthlyUniqueStudents.add(p));
+            // Track by lesson type
+            if (isOneOnOne) {
+              stats.monthlyOneOnOneParticipants += attendeeCount;
+            } else {
+              stats.monthlyGroupParticipants += attendeeCount;
+            }
           }
         });
 
@@ -1274,17 +1315,38 @@ class DashboardService {
           const isThisWeek = bookingDate >= thisWeekStart && bookingDate <= now;
           const isThisMonth = bookingDate >= thisMonthStart && bookingDate <= now;
 
+          // Determine if this booking is for a group or one-on-one lesson
+          const isOneOnOne = booking.lessonType === 'one-on-one' || 
+                             booking.lessonType === 'bireysel' ||
+                             booking.packageType === 'one-on-one' ||
+                             booking.packageType === 'bireysel';
+
           if (isToday) {
             stats.dailyAttendance += 1;
             if (booking.userId) stats.dailyUniqueStudents.add(booking.userId);
+            if (isOneOnOne) {
+              stats.dailyOneOnOneParticipants += 1;
+            } else {
+              stats.dailyGroupParticipants += 1;
+            }
           }
           if (isThisWeek) {
             stats.weeklyAttendance += 1;
             if (booking.userId) stats.weeklyUniqueStudents.add(booking.userId);
+            if (isOneOnOne) {
+              stats.weeklyOneOnOneParticipants += 1;
+            } else {
+              stats.weeklyGroupParticipants += 1;
+            }
           }
           if (isThisMonth) {
             stats.monthlyAttendance += 1;
             if (booking.userId) stats.monthlyUniqueStudents.add(booking.userId);
+            if (isOneOnOne) {
+              stats.monthlyOneOnOneParticipants += 1;
+            } else {
+              stats.monthlyGroupParticipants += 1;
+            }
           }
         });
 
@@ -1357,6 +1419,121 @@ class DashboardService {
       return {
         success: false,
         error: 'En iyi eğitmenler alınırken hata oluştu'
+      };
+    }
+  }
+
+  // Get participant statistics by lesson type (group vs one-on-one)
+  async getParticipantStatsByType() {
+    try {
+      const lessonsSnapshot = await getDocs(collection(db, 'lessons'));
+      const allLessons = lessonsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      
+      // Start of this week (Monday)
+      const dayOfWeek = today.getDay();
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const thisWeekStart = new Date(today);
+      thisWeekStart.setDate(today.getDate() - daysFromMonday);
+      thisWeekStart.setHours(0, 0, 0, 0);
+      
+      // End of this week (Sunday)
+      const thisWeekEnd = new Date(thisWeekStart);
+      thisWeekEnd.setDate(thisWeekStart.getDate() + 7);
+      
+      // Start of this month
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      // Initialize stats
+      const stats = {
+        today: { group: 0, oneOnOne: 0, total: 0 },
+        thisWeek: { group: 0, oneOnOne: 0, total: 0 },
+        thisMonth: { group: 0, oneOnOne: 0, total: 0 }
+      };
+
+      allLessons.forEach(lesson => {
+        // Skip cancelled or deleted lessons
+        if (lesson.status === 'cancelled' || lesson.status === 'deleted') return;
+
+        const participants = lesson.participants || [];
+        const participantCount = participants.length;
+        
+        if (participantCount === 0) return;
+
+        // Determine lesson type: one-on-one if lessonType is 'one-on-one' or maxParticipants is 1
+        const isOneOnOne = 
+          lesson.lessonType === 'one-on-one' || 
+          lesson.lessonType === 'bireysel' ||
+          lesson.packageType === 'one-on-one' ||
+          lesson.packageType === 'bireysel' ||
+          lesson.maxParticipants === 1 ||
+          lesson.maxStudents === 1;
+
+        // Get lesson date
+        let lessonDate = null;
+        if (lesson.scheduledDate) {
+          lessonDate = parseDateValue(lesson.scheduledDate);
+        }
+
+        if (!lessonDate) return;
+
+        // Check if today
+        const isToday = lessonDate >= today && lessonDate < tomorrow;
+        
+        // Check if this week
+        const isThisWeek = lessonDate >= thisWeekStart && lessonDate < thisWeekEnd;
+        
+        // Check if this month
+        const isThisMonth = lessonDate >= thisMonthStart && lessonDate < thisMonthEnd;
+
+        // Add to appropriate stats
+        if (isToday) {
+          stats.today.total += participantCount;
+          if (isOneOnOne) {
+            stats.today.oneOnOne += participantCount;
+          } else {
+            stats.today.group += participantCount;
+          }
+        }
+
+        if (isThisWeek) {
+          stats.thisWeek.total += participantCount;
+          if (isOneOnOne) {
+            stats.thisWeek.oneOnOne += participantCount;
+          } else {
+            stats.thisWeek.group += participantCount;
+          }
+        }
+
+        if (isThisMonth) {
+          stats.thisMonth.total += participantCount;
+          if (isOneOnOne) {
+            stats.thisMonth.oneOnOne += participantCount;
+          } else {
+            stats.thisMonth.group += participantCount;
+          }
+        }
+      });
+
+      return {
+        success: true,
+        data: stats
+      };
+    } catch (error) {
+      console.error('Error fetching participant stats by type:', error);
+      return {
+        success: false,
+        error: 'Katılımcı istatistikleri alınırken hata oluştu',
+        data: {
+          today: { group: 0, oneOnOne: 0, total: 0 },
+          thisWeek: { group: 0, oneOnOne: 0, total: 0 },
+          thisMonth: { group: 0, oneOnOne: 0, total: 0 }
+        }
       };
     }
   }

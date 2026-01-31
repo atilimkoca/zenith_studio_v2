@@ -13,6 +13,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import memberService from './memberService';
 
 class ScheduleService {
   normalizeDate(value) {
@@ -29,10 +30,24 @@ class ScheduleService {
       return Number.isNaN(date.getTime()) ? null : date;
     }
     if (typeof value === 'string') {
+      // Handle date-only strings (e.g., "2026-01-07") by parsing as local time
+      // This prevents timezone issues where UTC midnight becomes previous day in some timezones
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split('-').map(Number);
+        const date = new Date(year, month - 1, day); // Local time constructor
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? null : date;
     }
     return null;
+  }
+
+  // Normalize a date to midnight local time for date-only comparisons
+  normalizeDateToMidnight(value) {
+    const date = this.normalizeDate(value);
+    if (!date) return null;
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
   }
   
   // Create a new lesson
@@ -584,14 +599,17 @@ class ScheduleService {
           
           if (lesson.scheduledDate) {
             // For recurring lessons, check if the scheduled date is in this week
-            const lessonDate = new Date(lesson.scheduledDate);
+            // Use normalizeDate to handle date-only strings correctly (as local time)
+            const lessonDate = this.normalizeDate(lesson.scheduledDate);
             
-            // Normalize lesson date to local midnight
-            const lessonDateLocal = new Date(lessonDate.getFullYear(), lessonDate.getMonth(), lessonDate.getDate());
-            const lessonTimestamp = lessonDateLocal.getTime();
-            
-            // Compare timestamps for accurate date comparison
-            includeLesson = lessonTimestamp >= startTimestamp && lessonTimestamp <= endTimestamp;
+            if (lessonDate) {
+              // Normalize lesson date to local midnight
+              const lessonDateLocal = new Date(lessonDate.getFullYear(), lessonDate.getMonth(), lessonDate.getDate());
+              const lessonTimestamp = lessonDateLocal.getTime();
+              
+              // Compare timestamps for accurate date comparison
+              includeLesson = lessonTimestamp >= startTimestamp && lessonTimestamp <= endTimestamp;
+            }
           } else {
             // For legacy lessons without specific dates, include them in all weeks
             includeLesson = true;
@@ -1086,6 +1104,22 @@ class ScheduleService {
         };
       }
 
+      // Check if user is deleted
+      if (userData.status === 'deleted' || userData.status === 'permanently_deleted') {
+        return {
+          success: false,
+          error: 'Bu öğrenci silinmiş. Silinen üyeler derse eklenemez.'
+        };
+      }
+
+      // Check if user is cancelled
+      if (userData.status === 'cancelled' || userData.membershipStatus === 'cancelled') {
+        return {
+          success: false,
+          error: 'Bu öğrencinin üyeliği iptal edilmiş. İptal edilen üyeler derse eklenemez.'
+        };
+      }
+
       // Check if user is frozen
       if (userData.membershipStatus === 'frozen' || userData.status === 'frozen') {
         return {
@@ -1136,8 +1170,17 @@ class ScheduleService {
             error: 'Geçmiş bir derse öğrenci eklenemez. Bu ders zaten gerçekleşti.'
           };
         }
+
+        // Check if user has a package that covers this lesson date using multi-package system
+        const canBookResult = await memberService.canBookLessonOnDate(userId, lessonDate);
+        if (!canBookResult.canBook) {
+          return {
+            success: false,
+            error: canBookResult.message || 'Bu ders tarihi için geçerli bir paketiniz bulunmuyor.'
+          };
+        }
       }
-      
+
       // Check if lesson is full
       if (currentParticipants.length >= maxParticipants) {
         return {
@@ -1145,7 +1188,7 @@ class ScheduleService {
           error: 'Ders dolu. Maksimum katılımcı sayısına ulaşıldı.'
         };
       }
-      
+
       // Check if user is already registered
       if (currentParticipants.includes(userId)) {
         return {
@@ -1153,27 +1196,41 @@ class ScheduleService {
           error: 'Öğrenci zaten bu derse kayıtlı.'
         };
       }
-      
-      // Deduct one credit from user
-      await updateDoc(userRef, {
-        remainingClasses: remainingCredits - 1,
-        lessonCredits: remainingCredits - 1, // Keep both fields in sync
-        updatedAt: serverTimestamp()
-      });
-      
+
+      // Get the lesson date for deduction
+      let lessonDateForDeduction = lessonData.scheduledDate;
+      if (typeof lessonDateForDeduction === 'object' && lessonDateForDeduction.toDate) {
+        lessonDateForDeduction = lessonDateForDeduction.toDate().toISOString();
+      }
+
+      // Deduct lesson from the appropriate package using multi-package system
+      const deductResult = await memberService.deductLessonFromPackage(
+        userId,
+        lessonDateForDeduction,
+        `${lessonData.title} - ${lessonData.scheduledDate}`
+      );
+
+      if (!deductResult.success) {
+        return {
+          success: false,
+          error: deductResult.error || 'Ders kredisi düşülürken bir hata oluştu.'
+        };
+      }
+
       // Add user to participants
       const updatedParticipants = [...currentParticipants, userId];
-      
+
       await updateDoc(lessonRef, {
         participants: updatedParticipants,
         currentParticipants: updatedParticipants.length,
         updatedAt: serverTimestamp()
       });
-      
+
       return {
         success: true,
-        message: 'Öğrenci derse başarıyla eklendi.',
-        remainingCredits: remainingCredits - 1
+        message: `Öğrenci derse başarıyla eklendi. (${deductResult.packageName} paketinden düşüldü)`,
+        remainingCredits: deductResult.totalRemaining,
+        deductedFromPackage: deductResult.packageName
       };
     } catch (error) {
       console.error('❌ Error adding student to lesson:', error);
@@ -1231,21 +1288,24 @@ class ScheduleService {
         };
       }
       
-      // Refund credit to user
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const currentCredits = userData.remainingClasses || userData.lessonCredits || 0;
-        
-        await updateDoc(userRef, {
-          remainingClasses: currentCredits + 1,
-          lessonCredits: currentCredits + 1, // Keep both fields in sync
-          updatedAt: serverTimestamp()
-        });
+      // Refund credit to the appropriate package
+      let lessonDateForRefund = lessonData.scheduledDate;
+      if (typeof lessonDateForRefund === 'object' && lessonDateForRefund.toDate) {
+        lessonDateForRefund = lessonDateForRefund.toDate().toISOString();
       }
-      
+
+      const refundResult = await memberService.refundLessonToPackage(
+        userId,
+        lessonDateForRefund,
+        `Ders iptali: ${lessonData.title} - ${lessonData.scheduledDate}`
+      );
+
+      if (!refundResult.success) {
+        console.warn('⚠️ Could not refund credit to package:', refundResult.error);
+      } else {
+        console.log('✅ Lesson credit refunded to package:', refundResult.packageName);
+      }
+
       // Remove user from participants
       const updatedParticipants = currentParticipants.filter(id => id !== userId);
       

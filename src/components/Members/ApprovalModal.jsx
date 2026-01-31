@@ -124,6 +124,9 @@ const ApprovalModal = ({ member, onApprove, onReject, onClose }) => {
     setApprovalData(prev => ({
       ...prev,
       membershipType: type,
+      packageId: `fallback_${type}`, // Set a fallback packageId
+      packageType: 'group', // Default to group for fallback packages
+      packageName: option.name, // Set package name (Temel, Premium, Sınırsız)
       sessions: sessionMap[type],
       classes: option.defaultClasses.toString(),
       price: option.defaultPrice.toString()

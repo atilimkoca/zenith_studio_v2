@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './EditMemberModal.css';
 import PhoneInput from '../UI/PhoneInput';
 import packageService from '../../services/packageService';
+import memberService from '../../services/memberService';
 
 const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false }) => {
   const [formData, setFormData] = useState({
@@ -20,13 +21,17 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
   const [packages, setPackages] = useState([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
 
+  // State for all user packages (multi-package support)
+  const [userPackages, setUserPackages] = useState([]);
+  const [loadingUserPackages, setLoadingUserPackages] = useState(false);
+
   // Load packages on mount
   useEffect(() => {
     const fetchPackages = async () => {
       try {
         setLoadingPackages(true);
         const result = await packageService.getAllPackages();
-        
+
         if (result.success) {
           setPackages(result.data);
         }
@@ -36,11 +41,34 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
         setLoadingPackages(false);
       }
     };
-    
+
     if (isOpen) {
       fetchPackages();
     }
   }, [isOpen]);
+
+  // Load user's packages (multi-package support)
+  useEffect(() => {
+    const fetchUserPackages = async () => {
+      if (!member?.id) return;
+
+      try {
+        setLoadingUserPackages(true);
+        const result = await memberService.getUserPackages(member.id);
+        if (result.success) {
+          setUserPackages(result.packages);
+        }
+      } catch (error) {
+        console.error('Error loading user packages:', error);
+      } finally {
+        setLoadingUserPackages(false);
+      }
+    };
+
+    if (isOpen && member?.id) {
+      fetchUserPackages();
+    }
+  }, [isOpen, member?.id]);
 
   useEffect(() => {
     if (member) {
@@ -307,6 +335,63 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
                 {errors.remainingClasses && <span className="error-message">{errors.remainingClasses}</span>}
               </div>
             </div>
+
+            {/* All Packages Section */}
+            {userPackages.length > 0 && (
+              <div className="user-packages-section">
+                <h4 className="packages-section-title">
+                  Tüm Paketler ({userPackages.length})
+                </h4>
+                <div className="user-packages-list">
+                  {userPackages.map((pkg, index) => {
+                    const isActive = pkg.status === 'active';
+                    const isExpired = pkg.status === 'expired';
+                    const isUpcoming = pkg.status === 'upcoming';
+
+                    const statusClass = isActive ? 'active' : isExpired ? 'expired' : isUpcoming ? 'upcoming' : 'depleted';
+                    const statusText = isActive ? 'Aktif' : isExpired ? 'Süresi Doldu' : isUpcoming ? 'Yaklaşan' : 'Tükendi';
+
+                    const formatDate = (dateStr) => {
+                      if (!dateStr) return '-';
+                      try {
+                        return new Date(dateStr).toLocaleDateString('tr-TR');
+                      } catch {
+                        return '-';
+                      }
+                    };
+
+                    return (
+                      <div key={pkg.id || index} className={`user-package-card ${statusClass}`}>
+                        <div className="package-card-header">
+                          <span className="package-card-name">{pkg.packageName}</span>
+                          <span className={`package-status-badge ${statusClass}`}>{statusText}</span>
+                        </div>
+                        <div className="package-card-dates">
+                          📅 {formatDate(pkg.startDate)} - {formatDate(pkg.expiryDate)}
+                        </div>
+                        <div className="package-card-stats">
+                          <span className="stat">
+                            <strong>{pkg.remainingLessons}</strong> Kalan
+                          </span>
+                          <span className="stat">
+                            <strong>{(pkg.totalLessons || 0) - (pkg.remainingLessons || 0)}</strong> Kullanılan
+                          </span>
+                          <span className="stat">
+                            <strong>{pkg.totalLessons}</strong> Toplam
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {loadingUserPackages && (
+              <div className="loading-packages-section">
+                <span>Paketler yükleniyor...</span>
+              </div>
+            )}
           </div>
           
           <div className="edit-modal-footer">

@@ -6,6 +6,30 @@ import trainersService from '../../services/trainersService';
 import memberService from '../../services/memberService';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Helper function to format date as local YYYY-MM-DD string (avoids UTC conversion issues)
+const formatDateToLocalString = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Helper function to parse date string as local time (avoids UTC timezone issues)
+const parseDateAsLocal = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (value.toDate) return value.toDate(); // Firebase Timestamp
+  if (typeof value === 'string') {
+    // Handle date-only strings (e.g., "2026-01-09") by parsing as local time
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return new Date(value);
+  }
+  return new Date(value);
+};
+
 const Schedule = () => {
   const { currentUser } = useAuth();
   const [schedule, setSchedule] = useState({});
@@ -614,7 +638,8 @@ const Schedule = () => {
     // Calculate the specific date for this lesson
     const dayIndex = Object.keys(daysOfWeek).indexOf(dayOfWeek);
     const specificDate = weekDates[dayIndex];
-    const scheduledDate = specificDate.toISOString();
+    // Use local date string (YYYY-MM-DD) to avoid UTC timezone issues
+    const scheduledDate = formatDateToLocalString(specificDate);
     
     console.log('📅 Creating lesson for specific date:', {
       dayOfWeek,
@@ -893,7 +918,8 @@ const Schedule = () => {
           currentParticipants: 0, // Always start at 0 for new classes
           description: recurringForm.description,
           level: recurringForm.level,
-          scheduledDate: lessonDate.toISOString(),
+          // Use local date string (YYYY-MM-DD) to avoid UTC timezone issues
+          scheduledDate: formatDateToLocalString(lessonDate),
           isRecurring: true,
           recurringSeriesId: `series_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           weekNumber: week + 1,
@@ -1494,16 +1520,9 @@ const Schedule = () => {
     if (!lesson.scheduledDate || !lesson.startTime) return false;
     
     const now = new Date();
-    let lessonDate;
-    
-    // Parse the scheduled date
-    if (typeof lesson.scheduledDate === 'string') {
-      lessonDate = new Date(lesson.scheduledDate);
-    } else if (lesson.scheduledDate.toDate) {
-      lessonDate = lesson.scheduledDate.toDate();
-    } else {
-      lessonDate = new Date(lesson.scheduledDate);
-    }
+    // Use parseDateAsLocal to handle date-only strings correctly
+    let lessonDate = parseDateAsLocal(lesson.scheduledDate);
+    if (!lessonDate) return false;
     
     // Parse and set the time (format: "HH:MM")
     const [hours, minutes] = lesson.startTime.split(':').map(Number);
@@ -1525,11 +1544,12 @@ const Schedule = () => {
     const currentWeekLessons = dayLessons.filter(lesson => {
       // If lesson has scheduledDate, check if it matches the current week
       if (lesson.scheduledDate) {
-        const lessonDate = new Date(lesson.scheduledDate);
+        // Use parseDateAsLocal to handle date-only strings correctly
+        const lessonDate = parseDateAsLocal(lesson.scheduledDate);
         const currentDate = new Date(currentDayDate);
         
         // Compare dates (ignore time)
-        return lessonDate.toDateString() === currentDate.toDateString();
+        return lessonDate && lessonDate.toDateString() === currentDate.toDateString();
       }
       
       // For legacy lessons without scheduledDate, show them in all weeks
@@ -1561,9 +1581,10 @@ const Schedule = () => {
     // Filter lessons to only show those for the current week
     const currentWeekLessons = dayLessons.filter(lesson => {
       if (lesson.scheduledDate) {
-        const lessonDate = new Date(lesson.scheduledDate);
+        // Use parseDateAsLocal to handle date-only strings correctly
+        const lessonDate = parseDateAsLocal(lesson.scheduledDate);
         const currentDate = new Date(currentDayDate);
-        return lessonDate.toDateString() === currentDate.toDateString();
+        return lessonDate && lessonDate.toDateString() === currentDate.toDateString();
       }
       return true;
     });
