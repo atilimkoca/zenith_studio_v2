@@ -233,16 +233,17 @@ class MemberService {
       if (memberDoc.exists()) {
         // It's in members collection
         const approvalDate = new Date();
-        
+
         // Use startDate from membershipDetails if provided, otherwise use approvalDate
-        const packageStartDate = membershipDetails.startDate 
-          ? new Date(membershipDetails.startDate) 
+        const packageStartDate = membershipDetails.startDate
+          ? new Date(membershipDetails.startDate)
           : approvalDate;
-        
+
         // Calculate expiry from start date (not approval date)
+        // Use 30 days per month for consistent expiry calculation across all platforms
         const durationMonths = membershipDetails.duration || 1;
         const packageExpiryDate = new Date(packageStartDate);
-        packageExpiryDate.setMonth(packageExpiryDate.getMonth() + durationMonths);
+        packageExpiryDate.setDate(packageExpiryDate.getDate() + (durationMonths * 30));
 
         // Determine remaining classes and package name
         let remainingClasses = 0;
@@ -347,24 +348,25 @@ class MemberService {
         
         // Use startDate from membershipDetails if provided, otherwise use approvalDate
         const packageStartDate = membershipDetails.startDate 
-          ? new Date(membershipDetails.startDate) 
+          ? new Date(membershipDetails.startDate)
           : approvalDate;
-        
+
         // Calculate expiry from start date (not approval date)
+        // Use 30 days per month for consistent expiry calculation across all platforms
         const durationMonths = membershipDetails.duration || 1;
         const packageExpiryDate = new Date(packageStartDate);
-        packageExpiryDate.setMonth(packageExpiryDate.getMonth() + durationMonths);
+        packageExpiryDate.setDate(packageExpiryDate.getDate() + (durationMonths * 30));
 
         // Determine remaining classes and package name
         let remainingClasses = 0;
         let packageName = 'Standart Paket';
-        
+
         // PRIORITY 1: If packageId is provided, fetch actual package details from database
         if (membershipDetails.packageId) {
           try {
             const packageRef = doc(db, 'packages', membershipDetails.packageId);
             const packageDoc = await getDoc(packageRef);
-            
+
             if (packageDoc.exists()) {
               const packageData = packageDoc.data();
               packageName = packageData.name || 'Standart Paket';
@@ -467,7 +469,8 @@ class MemberService {
       
       const renewalDate = new Date();
       const packageExpiryDate = new Date(renewalDate);
-      packageExpiryDate.setMonth(packageExpiryDate.getMonth() + 1); // 1 month from renewal
+      // Use 30 days for consistent expiry calculation across all platforms
+      packageExpiryDate.setDate(packageExpiryDate.getDate() + 30);
 
       // Determine remaining classes based on package details
       let remainingClasses = 0;
@@ -717,7 +720,8 @@ class MemberService {
             : null;
           if (!packageExpiryDate || Number.isNaN(packageExpiryDate.getTime())) {
             packageExpiryDate = new Date(packageStartDate);
-            packageExpiryDate.setMonth(packageExpiryDate.getMonth() + durationInMonths);
+            // Use 30 days per month for consistent expiry calculation across all platforms
+            packageExpiryDate.setDate(packageExpiryDate.getDate() + (durationInMonths * 30));
           }
 
           sanitizedData.packageStartDate = packageStartDate.toISOString();
@@ -2136,7 +2140,8 @@ class MemberService {
         : new Date();
       const durationMonths = packageDetails.duration || 1;
       const expiryDate = new Date(startDate);
-      expiryDate.setMonth(expiryDate.getMonth() + durationMonths);
+      // Use 30 days per month for consistent expiry calculation across all platforms
+      expiryDate.setDate(expiryDate.getDate() + (durationMonths * 30));
 
       // Create new package entry
       const newPackage = {
