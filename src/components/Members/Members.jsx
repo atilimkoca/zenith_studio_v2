@@ -55,7 +55,29 @@ const PACKAGE_TYPE_BADGES = {
   group: { label: '👯 Grup Dersi', className: 'group' }
 };
 
+// Helper to get the active package from packages array
+const getActivePackageFromArray = (member) => {
+  const packages = member.packages || [];
+  if (packages.length === 0) return null;
+  
+  // Find active package, or the first non-cancelled one
+  const activePackage = packages.find(pkg => pkg.status === 'active') 
+    || packages.find(pkg => pkg.status !== 'cancelled');
+  
+  return activePackage || null;
+};
+
 const getMembershipBadgeInfo = (member = {}) => {
+  // First check packages array (new multi-package system)
+  const activePackage = getActivePackageFromArray(member);
+  if (activePackage?.packageName) {
+    const pkgName = sanitizePackageName(activePackage.packageName);
+    if (pkgName) {
+      return { label: pkgName, className: 'custom' };
+    }
+  }
+
+  // Then check root level and packageInfo (legacy)
   const packageName =
     sanitizePackageName(member.packageName) ||
     sanitizePackageName(member.packageInfo?.packageName);
@@ -64,7 +86,12 @@ const getMembershipBadgeInfo = (member = {}) => {
     return { label: packageName, className: 'custom' };
   }
 
-  const packageType = normalizePackageType(member.packageInfo?.packageType || member.packageType);
+  // Check package type from active package, packageInfo, or root
+  const packageType = normalizePackageType(
+    activePackage?.packageType || 
+    member.packageInfo?.packageType || 
+    member.packageType
+  );
   if (packageType && PACKAGE_TYPE_BADGES[packageType]) {
     return PACKAGE_TYPE_BADGES[packageType];
   }
@@ -463,7 +490,15 @@ const Members = () => {
   };
 
   const getPackageExpiryDate = (member) => {
-    const rawExpiry = member.packageExpiryDate || member.packageInfo?.expiryDate;
+    // First check packages array (new multi-package system)
+    const activePackage = getActivePackageFromArray(member);
+    let rawExpiry = activePackage?.expiryDate;
+    
+    // Fallback to legacy fields
+    if (!rawExpiry) {
+      rawExpiry = member.packageExpiryDate || member.packageInfo?.expiryDate;
+    }
+    
     if (!rawExpiry) return null;
 
     try {
@@ -524,6 +559,32 @@ const Members = () => {
 
   const hasFrozenMembers = members.some(member => member.membershipStatus === 'frozen' || member.status === 'frozen');
 
+  // Migration function for fixing package data
+  const handleMigratePackageData = async () => {
+    if (!window.confirm('Bu işlem tüm üyelerin paket verilerini düzeltecek. Devam etmek istiyor musunuz?')) {
+      return;
+    }
+    
+    try {
+      setIsProcessing(true);
+      showSuccess('Migrasyon başlatıldı... Lütfen bekleyin.');
+      
+      const result = await memberService.migrateAllUsersPackageData();
+      
+      if (result.success) {
+        showSuccess(`Migrasyon tamamlandı! ${result.migrated} üye güncellendi, ${result.skipped} üye zaten günceldi.`);
+        await loadMembers(); // Refresh the list
+      } else {
+        showError(`Migrasyon hatası: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Migration error:', err);
+      showError('Migrasyon sırasında bir hata oluştu');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <div className="members-page">
       <div className="members-header">
@@ -537,6 +598,26 @@ const Members = () => {
               filterStatus === 'frozen' ? 'dondurulmuş' : 'pasif'
             } üye`}
           </p>
+        </div>
+        <div className="header-right">
+          <button
+            className="migrate-btn"
+            onClick={handleMigratePackageData}
+            disabled={isProcessing}
+            title="Eski paket verilerini düzelt"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f59e0b',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500'
+            }}
+          >
+            🔧 Paket Verilerini Düzelt
+          </button>
         </div>
       </div>
 

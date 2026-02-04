@@ -253,7 +253,33 @@ class ScheduleService {
   // Delete lesson
   async deleteLesson(lessonId) {
     try {
-      await deleteDoc(doc(db, 'lessons', lessonId));
+      // First get the lesson to refund participants
+      const lessonRef = doc(db, 'lessons', lessonId);
+      const lessonDoc = await getDoc(lessonRef);
+      
+      if (lessonDoc.exists()) {
+        const lessonData = lessonDoc.data();
+        const participants = lessonData.participants || [];
+        const lessonScheduledDate = lessonData.scheduledDate || lessonData.date;
+        
+        // Refund credits to all participants before deleting
+        if (participants.length > 0 && lessonScheduledDate) {
+          for (const participantId of participants) {
+            try {
+              await memberService.refundLessonToPackage(
+                participantId,
+                lessonScheduledDate,
+                `Ders silindi: ${lessonData.title || 'İsimsiz Ders'}`
+              );
+              console.log(`✅ Credit refunded for participant: ${participantId}`);
+            } catch (refundError) {
+              console.error(`❌ Failed to refund credit for participant ${participantId}:`, refundError);
+            }
+          }
+        }
+      }
+      
+      await deleteDoc(lessonRef);
       
       return {
         success: true
@@ -263,6 +289,58 @@ class ScheduleService {
       return {
         success: false,
         error: 'Ders silinirken hata oluştu'
+      };
+    }
+  }
+
+  // Cancel lesson (soft delete)
+  async cancelLesson(lessonId, adminId) {
+    try {
+      const lessonRef = doc(db, 'lessons', lessonId);
+      const lessonDoc = await getDoc(lessonRef);
+      
+      if (!lessonDoc.exists()) {
+        return {
+          success: false,
+          error: 'Ders bulunamadı'
+        };
+      }
+      
+      const lessonData = lessonDoc.data();
+      const participants = lessonData.participants || [];
+      const lessonScheduledDate = lessonData.scheduledDate || lessonData.date;
+      
+      // Refund credits to all participants
+      if (participants.length > 0 && lessonScheduledDate) {
+        for (const participantId of participants) {
+          try {
+            await memberService.refundLessonToPackage(
+              participantId,
+              lessonScheduledDate,
+              `Ders iptal edildi: ${lessonData.title || 'İsimsiz Ders'}`
+            );
+            console.log(`✅ Credit refunded for participant: ${participantId}`);
+          } catch (refundError) {
+            console.error(`❌ Failed to refund credit for participant ${participantId}:`, refundError);
+          }
+        }
+      }
+      
+      await updateDoc(lessonRef, {
+        status: 'cancelled',
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: adminId,
+        updatedAt: serverTimestamp()
+      });
+      
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('❌ Error cancelling lesson:', error);
+      return {
+        success: false,
+        error: 'Ders iptal edilirken hata oluştu'
       };
     }
   }
@@ -903,6 +981,27 @@ class ScheduleService {
         };
       }
 
+      // Get lesson date for package deduction
+      let lessonDateForDeduction = lessonData.scheduledDate;
+      if (typeof lessonDateForDeduction === 'object' && lessonDateForDeduction.toDate) {
+        lessonDateForDeduction = lessonDateForDeduction.toDate().toISOString();
+      }
+
+      // Deduct lesson from the appropriate package using multi-package system
+      const memberService = (await import('./memberService')).default;
+      const deductResult = await memberService.deductLessonFromPackage(
+        participantId,
+        lessonDateForDeduction,
+        `${lessonData.title} - ${lessonData.scheduledDate}`
+      );
+
+      if (!deductResult.success) {
+        return {
+          success: false,
+          error: deductResult.error || 'Ders kredisi düşülürken bir hata oluştu'
+        };
+      }
+
       // Add participant to lesson
       participants.push(participantId);
 
@@ -912,18 +1011,11 @@ class ScheduleService {
         updatedAt: serverTimestamp()
       });
 
-      // Record the visit and reduce remaining classes
-      const memberService = (await import('./memberService')).default;
-      const visitResult = await memberService.recordVisit(participantId);
-
-      if (!visitResult.success) {
-        // Don't fail the whole operation, just log the warning
-      }
-
       return {
         success: true,
-        message: 'Katılımcı derse eklendi ve ders sayısı düşürüldü',
-        remainingClasses: visitResult.success ? visitResult.remainingClasses : null
+        message: `Katılımcı derse eklendi (${deductResult.packageName || 'Paket'} - Kalan: ${deductResult.totalRemaining})`,
+        remainingClasses: deductResult.totalRemaining,
+        deductedFromPackage: deductResult.packageName
       };
     } catch (error) {
       console.error('❌ Error adding participant to lesson:', error);
@@ -935,6 +1027,9 @@ class ScheduleService {
   }
 
   // Mark lesson as completed and reduce remaining classes for all participants
+  // Mark lesson as completed and record attendance for all participants
+  // NOTE: This does NOT deduct credits - credits are already deducted when participants join the lesson
+  // This function only marks the lesson as completed and records attendance history
   async completeLessonAndRecordAttendance(lessonId) {
     try {
       
@@ -958,19 +1053,53 @@ class ScheduleService {
         };
       }
 
-      // Record visits for all participants
+      // Record attendance history for all participants (without deducting credits)
       const memberService = (await import('./memberService')).default;
       const attendanceResults = [];
       
       for (const participantId of participants) {
-        const visitResult = await memberService.recordVisit(participantId);
-        attendanceResults.push({
-          participantId,
-          success: visitResult.success,
-          remainingClasses: visitResult.remainingClasses,
-          error: visitResult.error
-        });
-        
+        try {
+          // Get member data to record attendance history
+          let memberRef = null;
+          let memberData = null;
+          
+          const memberDocRef = doc(db, 'members', participantId);
+          const memberDoc = await getDoc(memberDocRef);
+          
+          if (memberDoc.exists()) {
+            memberData = memberDoc.data();
+            memberRef = memberDocRef;
+          } else {
+            const userRef = doc(db, 'users', participantId);
+            const userDoc = await getDoc(userRef);
+            if (userDoc.exists()) {
+              memberData = userDoc.data();
+              memberRef = userRef;
+            }
+          }
+          
+          if (memberRef && memberData) {
+            // Update lastVisit and totalVisits for attendance history (but NOT remainingClasses)
+            await updateDoc(memberRef, {
+              lastVisit: new Date().toISOString(),
+              totalVisits: (memberData.totalVisits || 0) + 1,
+              updatedAt: serverTimestamp()
+            });
+          }
+          
+          attendanceResults.push({
+            participantId,
+            success: true,
+            remainingClasses: memberData?.remainingClasses
+          });
+        } catch (err) {
+          console.error(`Error recording attendance for ${participantId}:`, err);
+          attendanceResults.push({
+            participantId,
+            success: false,
+            error: err.message
+          });
+        }
       }
 
       // Mark lesson as completed
@@ -1018,6 +1147,33 @@ class ScheduleService {
       const lessonData = lessonDoc.data();
       let participants = lessonData.participants || [];
 
+      // Check if participant is in the lesson
+      if (!participants.includes(participantId)) {
+        return {
+          success: false,
+          error: 'Katılımcı bu derste kayıtlı değil'
+        };
+      }
+
+      // Get lesson date for package refund
+      let lessonDateForRefund = lessonData.scheduledDate;
+      if (typeof lessonDateForRefund === 'object' && lessonDateForRefund.toDate) {
+        lessonDateForRefund = lessonDateForRefund.toDate().toISOString();
+      }
+
+      // Refund credit to the appropriate package using multi-package system
+      const memberService = (await import('./memberService')).default;
+      const refundResult = await memberService.refundLessonToPackage(
+        participantId,
+        lessonDateForRefund,
+        `Katılımcı çıkarıldı: ${lessonData.title} - ${lessonData.scheduledDate}`
+      );
+
+      if (!refundResult.success) {
+        console.warn('⚠️ Credit refund failed:', refundResult.error);
+        // Continue with removal even if refund fails
+      }
+
       // Remove participant from array
       participants = participants.filter(id => id !== participantId);
 
@@ -1029,7 +1185,10 @@ class ScheduleService {
 
       return {
         success: true,
-        message: 'Katılımcı dersten çıkarıldı'
+        message: refundResult.success 
+          ? `Katılımcı dersten çıkarıldı (${refundResult.packageName || 'Paket'} - Kalan: ${refundResult.totalRemaining})`
+          : 'Katılımcı dersten çıkarıldı (Kredi iadesi yapılamadı)',
+        remainingClasses: refundResult.totalRemaining
       };
     } catch (error) {
       console.error('❌ Error removing participant from lesson:', error);
