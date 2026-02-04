@@ -523,16 +523,6 @@ const Members = () => {
       return false;
     }
     
-    // Debug: Log member status to understand the data structure
-    if (members.length > 0 && filterStatus !== 'all') {
-      console.log('Member status debug:', {
-        name: member.displayName || `${member.firstName} ${member.lastName}`,
-        status: member.status,
-        membershipStatus: member.membershipStatus,
-        filterStatus
-      });
-    }
-    
     const matchesSearch = member.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           member.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           `${member.firstName || ''} ${member.lastName || ''}`.toLowerCase().includes(searchTerm.toLowerCase());

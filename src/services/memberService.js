@@ -788,8 +788,90 @@ class MemberService {
       }
 
       const hasPackageId = Object.prototype.hasOwnProperty.call(sanitizedData, 'packageId');
+      const hasSelectedPackageId = Object.prototype.hasOwnProperty.call(sanitizedData, 'selectedPackageId');
+      const hasRemainingClasses = Object.prototype.hasOwnProperty.call(sanitizedData, 'remainingClasses');
+      
+      // If selectedPackageId is provided, prioritize multi-package update logic
+      // This handles the case when editing remainingClasses from the edit modal
+      if (hasSelectedPackageId || (hasRemainingClasses && !hasPackageId) || (hasRemainingClasses && hasPackageId && sanitizedData.packageId === currentData?.packageId)) {
+        // Check if we need to update a specific package (multi-package support)
+        const selectedPackageId = sanitizedData.selectedPackageId;
+        delete sanitizedData.selectedPackageId; // Remove from update data
 
-      if (hasPackageId) {
+        if (selectedPackageId && currentData?.packages && Array.isArray(currentData.packages)) {
+          // Update the specific package's remainingLessons in the packages array
+          const updatedPackages = currentData.packages.map(pkg => {
+            if (pkg.id === selectedPackageId) {
+              return {
+                ...pkg,
+                remainingLessons: sanitizedData.remainingClasses
+              };
+            }
+            return pkg;
+          });
+
+          // Calculate total remaining from all non-cancelled packages
+          const totalRemaining = updatedPackages.reduce((sum, pkg) => {
+            if (pkg.status !== 'cancelled') {
+              return sum + (pkg.remainingLessons || 0);
+            }
+            return sum;
+          }, 0);
+
+          // Update packages array and root level fields
+          sanitizedData.packages = updatedPackages;
+          sanitizedData.remainingClasses = totalRemaining;
+          sanitizedData.lessonCredits = totalRemaining;
+          
+          // Also update packageInfo.remainingClasses to keep in sync
+          sanitizedData['packageInfo.remainingClasses'] = totalRemaining;
+        } else if (currentData?.packages && Array.isArray(currentData.packages) && currentData.packages.length > 0) {
+          // No specific package selected but has packages - update the first active package
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          let targetPackage = currentData.packages.find(pkg => {
+            if (pkg.status === 'cancelled') return false;
+            const expiryDate = new Date(pkg.expiryDate);
+            return expiryDate >= today;
+          });
+          
+          // If no active package, use the last one
+          if (!targetPackage) {
+            targetPackage = currentData.packages[currentData.packages.length - 1];
+          }
+          
+          const updatedPackages = currentData.packages.map(pkg => {
+            if (pkg.id === targetPackage.id) {
+              return {
+                ...pkg,
+                remainingLessons: sanitizedData.remainingClasses
+              };
+            }
+            return pkg;
+          });
+          
+          // Calculate total remaining from all non-cancelled packages
+          const totalRemaining = updatedPackages.reduce((sum, pkg) => {
+            if (pkg.status !== 'cancelled') {
+              return sum + (pkg.remainingLessons || 0);
+            }
+            return sum;
+          }, 0);
+          
+          sanitizedData.packages = updatedPackages;
+          sanitizedData.remainingClasses = totalRemaining;
+          sanitizedData.lessonCredits = totalRemaining;
+          sanitizedData['packageInfo.remainingClasses'] = totalRemaining;
+        } else {
+          // No packages array - update root level only
+          sanitizedData.lessonCredits = sanitizedData.remainingClasses;
+          // Also update packageInfo if it exists
+          if (currentData?.packageInfo) {
+            sanitizedData['packageInfo.remainingClasses'] = sanitizedData.remainingClasses;
+          }
+        }
+      } else if (hasPackageId) {
         if (sanitizedData.packageId) {
           const packageRef = doc(db, 'packages', sanitizedData.packageId);
           const packageDoc = await getDoc(packageRef);
@@ -887,43 +969,10 @@ class MemberService {
             sanitizedData.membershipStatus = 'inactive';
           }
         }
-      } else if (Object.prototype.hasOwnProperty.call(sanitizedData, 'remainingClasses')) {
-        // Check if we need to update a specific package (multi-package support)
-        const selectedPackageId = sanitizedData.selectedPackageId;
-        delete sanitizedData.selectedPackageId; // Remove from update data
-
-        if (selectedPackageId && currentData?.packages && Array.isArray(currentData.packages)) {
-          // Update the specific package's remainingLessons in the packages array
-          const updatedPackages = currentData.packages.map(pkg => {
-            if (pkg.id === selectedPackageId) {
-              return {
-                ...pkg,
-                remainingLessons: sanitizedData.remainingClasses
-              };
-            }
-            return pkg;
-          });
-
-          // Calculate total remaining from all non-cancelled packages
-          const totalRemaining = updatedPackages.reduce((sum, pkg) => {
-            if (pkg.status !== 'cancelled') {
-              return sum + (pkg.remainingLessons || 0);
-            }
-            return sum;
-          }, 0);
-
-          // Update packages array and root level fields
-          sanitizedData.packages = updatedPackages;
-          sanitizedData.remainingClasses = totalRemaining;
-          sanitizedData.lessonCredits = totalRemaining;
-        } else {
-          // No specific package selected or no packages array - update root level only
-          sanitizedData.lessonCredits = sanitizedData.remainingClasses;
-        }
-      } else {
-        // Remove selectedPackageId from data if present but no remainingClasses change
-        delete sanitizedData.selectedPackageId;
       }
+      
+      // Remove selectedPackageId if it wasn't already handled
+      delete sanitizedData.selectedPackageId;
 
       sanitizedData.updatedAt = usesMembersCollection ? serverTimestamp() : new Date().toISOString();
 
