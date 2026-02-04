@@ -125,6 +125,30 @@ class MemberService {
     }
   }
 
+  // Helper: Calculate remaining classes from packages array or packageInfo
+  // Returns calculated value from packages if available, otherwise uses packageInfo
+  calculateRemainingFromPackages(userData) {
+    const packages = userData.packages || [];
+
+    // If packages array has items, calculate from packages
+    if (packages.length > 0) {
+      return packages.reduce((sum, pkg) => {
+        if (pkg.status !== 'cancelled') {
+          return sum + (pkg.remainingLessons || 0);
+        }
+        return sum;
+      }, 0);
+    }
+
+    // If packages is empty but packageInfo exists, use packageInfo.remainingClasses
+    if (userData.packageInfo && userData.packageInfo.remainingClasses !== undefined) {
+      return userData.packageInfo.remainingClasses;
+    }
+
+    // Final fallback to root level values
+    return userData.remainingClasses || userData.lessonCredits || 0;
+  }
+
   // Get all members with optional filtering
   async getAllMembers(filters = {}) {
     try {
@@ -134,34 +158,45 @@ class MemberService {
       const membersCollection = collection(db, this.membersCollection);
       // Simplify query to avoid index requirements
       const querySnapshot = await getDocs(membersCollection);
-      const members = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        // Convert Firestore timestamp to readable date
-        createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
-        updatedAt: doc.data().updatedAt?.toDate?.()?.toISOString() || doc.data().updatedAt
-      }));
+      const members = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        // Calculate remainingClasses from packages if available
+        const calculatedRemaining = this.calculateRemainingFromPackages(data);
+        return {
+          id: doc.id,
+          ...data,
+          remainingClasses: calculatedRemaining,
+          // Convert Firestore timestamp to readable date
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt
+        };
+      });
 
       // Also get users with role 'customer' from users collection
       const usersCollection = collection(db, 'users');
       // Remove orderBy to avoid composite index requirement
       const customerQuery = query(usersCollection, where('role', '==', 'customer'));
       const customerSnapshot = await getDocs(customerQuery);
-      
-      const customerUsers = customerSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        // Normalize customer data to match member structure
-        membershipType: doc.data().membershipType || 'basic',
-        status: doc.data().status === 'active' ? 'approved' : doc.data().status || 'pending',
-        membershipStatus: doc.data().status || 'inactive',
-        remainingClasses: doc.data().remainingClasses || 0,
-        totalVisits: doc.data().totalVisits || 0,
-        lastVisit: doc.data().lastVisit || null,
-        joinDate: doc.data().joinDate || doc.data().createdAt,
-        createdAt: doc.data().createdAt,
-        updatedAt: doc.data().updatedAt
-      }));
+
+      const customerUsers = customerSnapshot.docs.map(doc => {
+        const data = doc.data();
+        // Calculate remainingClasses from packages if available
+        const calculatedRemaining = this.calculateRemainingFromPackages(data);
+        return {
+          id: doc.id,
+          ...data,
+          // Normalize customer data to match member structure
+          membershipType: data.membershipType || 'basic',
+          status: data.status === 'active' ? 'approved' : data.status || 'pending',
+          membershipStatus: data.status || 'inactive',
+          remainingClasses: calculatedRemaining,
+          totalVisits: data.totalVisits || 0,
+          lastVisit: data.lastVisit || null,
+          joinDate: data.joinDate || data.createdAt,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt
+        };
+      });
 
       // Combine both arrays
       const allMembers = [...members, ...customerUsers];
@@ -307,6 +342,23 @@ class MemberService {
           remainingClasses = 8;
         }
 
+        // Create package entry for packages array (multi-package support)
+        const packageId = membershipDetails.packageId || `pkg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newPackage = {
+          id: packageId,
+          packageId: membershipDetails.packageId || null,
+          packageName: packageName,
+          packageType: membershipDetails.packageType || 'group',
+          startDate: packageStartDate.toISOString(),
+          expiryDate: packageExpiryDate.toISOString(),
+          totalLessons: remainingClasses,
+          remainingLessons: remainingClasses,
+          assignedAt: approvalDate.toISOString(),
+          assignedBy: approvedBy,
+          status: 'active',
+          duration: durationMonths
+        };
+
         const updateData = {
           status: 'approved',
           membershipStatus: 'active',
@@ -317,14 +369,17 @@ class MemberService {
           packageStartDate: packageStartDate.toISOString(),
           packageExpiryDate: packageExpiryDate.toISOString(),
           remainingClasses: remainingClasses,
-          lessonCredits: remainingClasses, // For mobile app compatibility
-          packageType: membershipDetails.packageType || 'group', // Store package type at root level
-          // Add packageInfo object for mobile app compatibility
+          lessonCredits: remainingClasses,
+          packageType: membershipDetails.packageType || 'group',
+          // Add packages array (multi-package support)
+          packages: [newPackage],
+          // Add packageInfo object for backward compatibility
           packageInfo: {
-            packageId: membershipDetails.packageId || `pkg_${Date.now()}`,
+            packageId: packageId,
             packageName: packageName,
-            packageType: membershipDetails.packageType || 'group', // CRITICAL: Include packageType for mobile
+            packageType: membershipDetails.packageType || 'group',
             lessonCount: remainingClasses,
+            remainingClasses: remainingClasses, // Also store remainingClasses in packageInfo
             assignedAt: packageStartDate.toISOString(),
             expiryDate: packageExpiryDate.toISOString()
           },
@@ -419,6 +474,23 @@ class MemberService {
           remainingClasses = 8;
         }
 
+        // Create package entry for packages array (multi-package support)
+        const packageId = membershipDetails.packageId || `pkg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newPackage = {
+          id: packageId,
+          packageId: membershipDetails.packageId || null,
+          packageName: packageName,
+          packageType: membershipDetails.packageType || 'group',
+          startDate: packageStartDate.toISOString(),
+          expiryDate: packageExpiryDate.toISOString(),
+          totalLessons: remainingClasses,
+          remainingLessons: remainingClasses,
+          assignedAt: approvalDate.toISOString(),
+          assignedBy: approvedBy,
+          status: 'active',
+          duration: durationMonths
+        };
+
         const updateData = {
           status: 'approved',
           membershipStatus: 'active',
@@ -429,14 +501,17 @@ class MemberService {
           packageStartDate: packageStartDate.toISOString(),
           packageExpiryDate: packageExpiryDate.toISOString(),
           remainingClasses: remainingClasses,
-          lessonCredits: remainingClasses, // For mobile app compatibility
-          packageType: membershipDetails.packageType || 'group', // Store package type at root level
-          // Add packageInfo object for mobile app compatibility
+          lessonCredits: remainingClasses,
+          packageType: membershipDetails.packageType || 'group',
+          // Add packages array (multi-package support)
+          packages: [newPackage],
+          // Add packageInfo object for backward compatibility
           packageInfo: {
-            packageId: membershipDetails.packageId || `pkg_${Date.now()}`,
+            packageId: packageId,
             packageName: packageName,
-            packageType: membershipDetails.packageType || 'group', // CRITICAL: Include packageType for mobile
+            packageType: membershipDetails.packageType || 'group',
             lessonCount: remainingClasses,
+            remainingClasses: remainingClasses, // Also store remainingClasses in packageInfo
             assignedAt: packageStartDate.toISOString(),
             expiryDate: packageExpiryDate.toISOString()
           },
@@ -760,7 +835,41 @@ class MemberService {
           }
         }
       } else if (Object.prototype.hasOwnProperty.call(sanitizedData, 'remainingClasses')) {
-        sanitizedData.lessonCredits = sanitizedData.remainingClasses;
+        // Check if we need to update a specific package (multi-package support)
+        const selectedPackageId = sanitizedData.selectedPackageId;
+        delete sanitizedData.selectedPackageId; // Remove from update data
+
+        if (selectedPackageId && currentData?.packages && Array.isArray(currentData.packages)) {
+          // Update the specific package's remainingLessons in the packages array
+          const updatedPackages = currentData.packages.map(pkg => {
+            if (pkg.id === selectedPackageId) {
+              return {
+                ...pkg,
+                remainingLessons: sanitizedData.remainingClasses
+              };
+            }
+            return pkg;
+          });
+
+          // Calculate total remaining from all non-cancelled packages
+          const totalRemaining = updatedPackages.reduce((sum, pkg) => {
+            if (pkg.status !== 'cancelled') {
+              return sum + (pkg.remainingLessons || 0);
+            }
+            return sum;
+          }, 0);
+
+          // Update packages array and root level fields
+          sanitizedData.packages = updatedPackages;
+          sanitizedData.remainingClasses = totalRemaining;
+          sanitizedData.lessonCredits = totalRemaining;
+        } else {
+          // No specific package selected or no packages array - update root level only
+          sanitizedData.lessonCredits = sanitizedData.remainingClasses;
+        }
+      } else {
+        // Remove selectedPackageId from data if present but no remainingClasses change
+        delete sanitizedData.selectedPackageId;
       }
 
       sanitizedData.updatedAt = usesMembersCollection ? serverTimestamp() : new Date().toISOString();
@@ -784,14 +893,17 @@ class MemberService {
     try {
       // First try members collection
       const memberDoc = await getDoc(doc(db, this.membersCollection, memberId));
-      
+
       if (memberDoc.exists()) {
         const data = memberDoc.data();
+        // Calculate remainingClasses from packages if available
+        const calculatedRemaining = this.calculateRemainingFromPackages(data);
         return {
           success: true,
           data: {
             id: memberDoc.id,
             ...data,
+            remainingClasses: calculatedRemaining,
             createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
             updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt
           }
@@ -800,16 +912,19 @@ class MemberService {
 
       // If not found in members collection, try users collection
       const userDoc = await getDoc(doc(db, 'users', memberId));
-      
+
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        
+        // Calculate remainingClasses from packages if available
+        const calculatedRemaining = this.calculateRemainingFromPackages(userData);
+
         // Normalize user data to match member structure
         return {
           success: true,
           data: {
             id: userDoc.id,
             ...userData,
+            remainingClasses: calculatedRemaining,
             // Ensure displayName exists
             displayName: userData.displayName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email,
             // Normalize membership fields
@@ -1805,30 +1920,64 @@ class MemberService {
   }
 
   // Helper function to process individual member expiration
+  // FIXED: Now recalculates remainingClasses from all packages instead of resetting to 0
   async processExpiredMember(memberId, memberData, today, collection) {
     try {
-      const packageExpiryDate = memberData.packageExpiryDate ? new Date(memberData.packageExpiryDate) : null;
-      const remainingClasses = memberData.remainingClasses || 0;
-      
-      // Skip unlimited memberships and already expired members
-      if (memberData.membershipType === 'unlimited' || remainingClasses === 0) {
+      // Skip unlimited memberships
+      if (memberData.membershipType === 'unlimited') {
         return false;
       }
 
-      // Check if package has expired
+      // If user has multi-package system, recalculate from packages
+      const packages = memberData.packages || [];
+      if (packages.length > 0) {
+        // Calculate total remaining from ALL non-cancelled packages
+        const totalRemainingFromPackages = packages.reduce((sum, pkg) => {
+          if (pkg.status !== 'cancelled') {
+            return sum + (pkg.remainingLessons || 0);
+          }
+          return sum;
+        }, 0);
+
+        const currentRemaining = memberData.remainingClasses || 0;
+
+        // Only update if there's a mismatch
+        if (currentRemaining !== totalRemainingFromPackages) {
+          console.log(`📋 Recalculating credits for member: ${memberData.displayName || memberData.firstName} (${currentRemaining} -> ${totalRemainingFromPackages})`);
+          const docRef = doc(db, collection, memberId);
+          await updateDoc(docRef, {
+            remainingClasses: totalRemainingFromPackages,
+            lessonCredits: totalRemainingFromPackages,
+            updatedAt: collection === 'members' ? serverTimestamp() : new Date().toISOString()
+          });
+          return true;
+        }
+        return false;
+      }
+
+      // Legacy single-package logic (only for users without packages array)
+      const packageExpiryDate = memberData.packageExpiryDate ? new Date(memberData.packageExpiryDate) : null;
+      const remainingClasses = memberData.remainingClasses || 0;
+
+      // Skip if already zero
+      if (remainingClasses === 0) {
+        return false;
+      }
+
+      // Check if legacy package has expired
       if (packageExpiryDate && packageExpiryDate < today && remainingClasses > 0) {
-        console.log(`📋 Resetting credits for expired member: ${memberData.displayName || memberData.firstName}`);
-        
+        console.log(`📋 Resetting credits for expired member (legacy): ${memberData.displayName || memberData.firstName}`);
+
         const updateData = {
           remainingClasses: 0,
           packageExpiredAt: today.toISOString(),
-          lastPackageResetReason: 'Package expired after 1 month',
+          lastPackageResetReason: 'Package expired after 1 month (legacy)',
           updatedAt: collection === 'members' ? serverTimestamp() : new Date().toISOString()
         };
 
         const docRef = doc(db, collection, memberId);
         await updateDoc(docRef, updateData);
-        
+
         return true;
       }
 
@@ -1840,28 +1989,61 @@ class MemberService {
   }
 
   // Silent version for automatic background checks
+  // FIXED: Now recalculates remainingClasses from all packages instead of resetting to 0
   async processExpiredMemberSilent(memberId, memberData, today, collection) {
     try {
-      const packageExpiryDate = memberData.packageExpiryDate ? new Date(memberData.packageExpiryDate) : null;
-      const remainingClasses = memberData.remainingClasses || 0;
-      
-      // Skip unlimited memberships and already expired members
-      if (memberData.membershipType === 'unlimited' || remainingClasses === 0) {
+      // Skip unlimited memberships
+      if (memberData.membershipType === 'unlimited') {
         return false;
       }
 
-      // Check if package has expired
+      // If user has multi-package system, recalculate from packages
+      const packages = memberData.packages || [];
+      if (packages.length > 0) {
+        // Calculate total remaining from ALL non-cancelled packages (not just active date range)
+        const totalRemainingFromPackages = packages.reduce((sum, pkg) => {
+          if (pkg.status !== 'cancelled') {
+            return sum + (pkg.remainingLessons || 0);
+          }
+          return sum;
+        }, 0);
+
+        const currentRemaining = memberData.remainingClasses || 0;
+
+        // Only update if there's a mismatch
+        if (currentRemaining !== totalRemainingFromPackages) {
+          const docRef = doc(db, collection, memberId);
+          await updateDoc(docRef, {
+            remainingClasses: totalRemainingFromPackages,
+            lessonCredits: totalRemainingFromPackages,
+            updatedAt: collection === 'members' ? serverTimestamp() : new Date().toISOString()
+          });
+          return true;
+        }
+        return false;
+      }
+
+      // Legacy single-package logic (only for users without packages array)
+      const packageExpiryDate = memberData.packageExpiryDate ? new Date(memberData.packageExpiryDate) : null;
+      const remainingClasses = memberData.remainingClasses || 0;
+
+      // Skip if already zero
+      if (remainingClasses === 0) {
+        return false;
+      }
+
+      // Check if legacy package has expired
       if (packageExpiryDate && packageExpiryDate < today && remainingClasses > 0) {
         const updateData = {
           remainingClasses: 0,
           packageExpiredAt: today.toISOString(),
-          lastPackageResetReason: 'Package expired after 1 month - Auto reset',
+          lastPackageResetReason: 'Package expired after 1 month - Auto reset (legacy)',
           updatedAt: collection === 'members' ? serverTimestamp() : new Date().toISOString()
         };
 
         const docRef = doc(db, collection, memberId);
         await updateDoc(docRef, updateData);
-        
+
         return true;
       }
 
@@ -2174,12 +2356,10 @@ class MemberService {
       // Add new package
       existingPackages.push(newPackage);
 
-      // Calculate total remaining lessons across all active packages
-      const now = new Date();
+      // Calculate total remaining lessons across ALL non-cancelled packages
+      // FIXED: Include all packages regardless of date to show accurate total credits
       const totalRemainingClasses = existingPackages.reduce((sum, pkg) => {
-        const pkgStart = new Date(pkg.startDate);
-        const pkgExpiry = new Date(pkg.expiryDate);
-        if (pkgStart <= now && pkgExpiry >= now && pkg.status === 'active') {
+        if (pkg.status !== 'cancelled') {
           return sum + (pkg.remainingLessons || 0);
         }
         return sum;
@@ -2372,12 +2552,10 @@ class MemberService {
         return pkg;
       });
 
-      // Calculate new total remaining
-      const now = new Date();
+      // Calculate new total remaining from ALL non-cancelled packages
+      // FIXED: Include all packages regardless of date to show accurate total credits
       const totalRemainingClasses = updatedPackages.reduce((sum, pkg) => {
-        const pkgStart = new Date(pkg.startDate);
-        const pkgExpiry = new Date(pkg.expiryDate);
-        if (pkgStart <= now && pkgExpiry >= now && pkg.status !== 'cancelled') {
+        if (pkg.status !== 'cancelled') {
           return sum + (pkg.remainingLessons || 0);
         }
         return sum;
@@ -2491,12 +2669,10 @@ class MemberService {
         return pkg;
       });
 
-      // Calculate new total remaining
-      const now = new Date();
+      // Calculate new total remaining from ALL non-cancelled packages
+      // FIXED: Include all packages regardless of date to show accurate total credits
       const totalRemainingClasses = updatedPackages.reduce((sum, pkg) => {
-        const pkgStart = new Date(pkg.startDate);
-        const pkgExpiry = new Date(pkg.expiryDate);
-        if (pkgStart <= now && pkgExpiry >= now && pkg.status !== 'cancelled') {
+        if (pkg.status !== 'cancelled') {
           return sum + (pkg.remainingLessons || 0);
         }
         return sum;
@@ -2574,7 +2750,11 @@ class MemberService {
     }
 
     const packageInfo = userData.packageInfo || {};
-    const remainingClasses = userData.remainingClasses || userData.lessonCredits || 0;
+
+    // FIXED: Check packageInfo.remainingClasses first, then root level values
+    const remainingClasses = packageInfo.remainingClasses !== undefined
+      ? packageInfo.remainingClasses
+      : (userData.remainingClasses || userData.lessonCredits || 0);
 
     // Don't migrate if no remaining classes and no valid expiry
     if (remainingClasses <= 0 && !userData.packageExpiryDate) {

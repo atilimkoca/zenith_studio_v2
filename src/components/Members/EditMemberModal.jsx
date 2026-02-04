@@ -25,6 +25,11 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
   const [userPackages, setUserPackages] = useState([]);
   const [loadingUserPackages, setLoadingUserPackages] = useState(false);
 
+  // State for package selection when editing (multi-package support)
+  const [activePackages, setActivePackages] = useState([]);
+  const [selectedPackageId, setSelectedPackageId] = useState(null);
+  const [showPackageSelection, setShowPackageSelection] = useState(false);
+
   // Load packages on mount
   useEffect(() => {
     const fetchPackages = async () => {
@@ -69,6 +74,46 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
       fetchUserPackages();
     }
   }, [isOpen, member?.id]);
+
+  // Calculate active packages (non-expired, non-cancelled) for edit selection
+  useEffect(() => {
+    if (userPackages.length > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const active = userPackages.filter(pkg => {
+        if (pkg.status === 'cancelled') return false;
+        if (!pkg.expiryDate) return true; // No expiry date means still active
+
+        try {
+          const expiryDate = new Date(pkg.expiryDate);
+          expiryDate.setHours(23, 59, 59, 999);
+          return expiryDate >= today;
+        } catch {
+          return false;
+        }
+      });
+
+      setActivePackages(active);
+
+      // If more than one active package, show selection
+      if (active.length > 1) {
+        setShowPackageSelection(true);
+        setSelectedPackageId(null); // Reset selection
+      } else if (active.length === 1) {
+        // Auto-select the only active package
+        setSelectedPackageId(active[0].id);
+        setShowPackageSelection(false);
+      } else {
+        setSelectedPackageId(null);
+        setShowPackageSelection(false);
+      }
+    } else {
+      setActivePackages([]);
+      setSelectedPackageId(null);
+      setShowPackageSelection(false);
+    }
+  }, [userPackages]);
 
   useEffect(() => {
     if (member) {
@@ -134,8 +179,22 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    // If multiple active packages exist and none selected, show error
+    if (showPackageSelection && !selectedPackageId) {
+      setErrors(prev => ({
+        ...prev,
+        packageSelection: 'Lütfen düzenlemek istediğiniz paketi seçin'
+      }));
+      return;
+    }
+
     if (validateForm()) {
-      onSave(formData);
+      // Include selected package ID for updating the correct package
+      onSave({
+        ...formData,
+        selectedPackageId: selectedPackageId
+      });
     }
   };
 
@@ -318,9 +377,74 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
               </div>
             </div>
 
+            {/* Package Selection for Multi-Package Edit */}
+            {showPackageSelection && activePackages.length > 1 && (
+              <div className="form-row">
+                <div className="form-group package-selection-group">
+                  <label>Hangi Paketi Düzenlemek İstiyorsunuz? *</label>
+                  <div className="package-selection-cards">
+                    {activePackages.map((pkg) => {
+                      const formatDate = (dateStr) => {
+                        if (!dateStr) return '-';
+                        try {
+                          return new Date(dateStr).toLocaleDateString('tr-TR');
+                        } catch {
+                          return '-';
+                        }
+                      };
+
+                      const isSelected = selectedPackageId === pkg.id;
+
+                      return (
+                        <div
+                          key={pkg.id}
+                          className={`package-selection-card ${isSelected ? 'selected' : ''}`}
+                          onClick={() => {
+                            setSelectedPackageId(pkg.id);
+                            // Update remainingClasses to show selected package's remaining
+                            setFormData(prev => ({
+                              ...prev,
+                              remainingClasses: pkg.remainingLessons || 0
+                            }));
+                            // Clear selection error
+                            if (errors.packageSelection) {
+                              setErrors(prev => ({
+                                ...prev,
+                                packageSelection: ''
+                              }));
+                            }
+                          }}
+                        >
+                          <div className="selection-card-header">
+                            <span className="selection-card-name">{pkg.packageName}</span>
+                            {isSelected && <span className="selection-checkmark">✓</span>}
+                          </div>
+                          <div className="selection-card-info">
+                            <span>📅 {formatDate(pkg.startDate)} - {formatDate(pkg.expiryDate)}</span>
+                          </div>
+                          <div className="selection-card-stats">
+                            <span><strong>{pkg.remainingLessons}</strong> Kalan</span>
+                            <span><strong>{pkg.totalLessons}</strong> Toplam</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {errors.packageSelection && <span className="error-message">{errors.packageSelection}</span>}
+                </div>
+              </div>
+            )}
+
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="remainingClasses">Kalan Ders Sayısı</label>
+                <label htmlFor="remainingClasses">
+                  Kalan Ders Sayısı
+                  {selectedPackageId && activePackages.length > 1 && (
+                    <span className="selected-package-label">
+                      {' '}(Seçili Paket)
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   id="remainingClasses"
