@@ -1161,6 +1161,8 @@ class ScheduleService {
         lessonDateForRefund = lessonDateForRefund.toDate().toISOString();
       }
 
+      console.log('🔄 Refunding credit for participant:', participantId, 'lessonDate:', lessonDateForRefund);
+
       // Refund credit to the appropriate package using multi-package system
       const memberService = (await import('./memberService')).default;
       const refundResult = await memberService.refundLessonToPackage(
@@ -1169,9 +1171,13 @@ class ScheduleService {
         `Katılımcı çıkarıldı: ${lessonData.title} - ${lessonData.scheduledDate}`
       );
 
+      console.log('📦 Refund result:', refundResult);
+
       if (!refundResult.success) {
         console.warn('⚠️ Credit refund failed:', refundResult.error);
         // Continue with removal even if refund fails
+      } else {
+        console.log('✅ Credit refunded successfully. Total remaining:', refundResult.totalRemaining);
       }
 
       // Remove participant from array

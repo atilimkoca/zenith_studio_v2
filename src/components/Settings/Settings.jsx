@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../../config/firebase';
 import './Settings.css';
@@ -34,12 +34,79 @@ const Settings = () => {
     confirmPassword: ''
   });
 
+  // App Version Management State
+  const [appVersionData, setAppVersionData] = useState({
+    latestVersion: '',
+    minimumVersion: '',
+    forceUpdate: false,
+    updateMessage: '',
+    updateMessageTr: '',
+    iosUrl: '',
+    androidUrl: ''
+  });
+  const [appVersionLoading, setAppVersionLoading] = useState(false);
+
   useEffect(() => {
     if (currentUser) {
       loadUserProfile();
+      loadAppVersionConfig();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // Load app version config from Firestore
+  const loadAppVersionConfig = async () => {
+    try {
+      const versionDoc = await getDoc(doc(db, 'appConfig', 'version'));
+      if (versionDoc.exists()) {
+        const data = versionDoc.data();
+        setAppVersionData({
+          latestVersion: data.latestVersion || '',
+          minimumVersion: data.minimumVersion || '',
+          forceUpdate: data.forceUpdate || false,
+          updateMessage: data.updateMessage || '',
+          updateMessageTr: data.updateMessageTr || '',
+          iosUrl: data.iosUrl || '',
+          androidUrl: data.androidUrl || ''
+        });
+      }
+    } catch (error) {
+      console.error('Error loading app version config:', error);
+    }
+  };
+
+  // Save app version config to Firestore
+  const handleAppVersionUpdate = async (e) => {
+    e.preventDefault();
+    
+    if (!appVersionData.latestVersion) {
+      showNotification('En son versiyon numarası zorunludur', 'error');
+      return;
+    }
+
+    try {
+      setAppVersionLoading(true);
+      
+      await setDoc(doc(db, 'appConfig', 'version'), {
+        latestVersion: appVersionData.latestVersion,
+        minimumVersion: appVersionData.minimumVersion || appVersionData.latestVersion,
+        forceUpdate: appVersionData.forceUpdate,
+        updateMessage: appVersionData.updateMessage,
+        updateMessageTr: appVersionData.updateMessageTr,
+        iosUrl: appVersionData.iosUrl,
+        androidUrl: appVersionData.androidUrl,
+        updatedAt: new Date(),
+        updatedBy: currentUser?.uid
+      });
+
+      showNotification('Uygulama versiyon ayarları güncellendi!', 'success');
+    } catch (error) {
+      console.error('Error updating app version config:', error);
+      showNotification('Versiyon ayarları güncellenirken hata oluştu', 'error');
+    } finally {
+      setAppVersionLoading(false);
+    }
+  };
 
   const loadUserProfile = async () => {
     if (!currentUser) {
@@ -423,6 +490,17 @@ const Settings = () => {
           <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
       )
+    },
+    { 
+      id: 'appVersion', 
+      name: 'Uygulama Versiyonu', 
+      icon: (
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      )
     }
   ];
 
@@ -720,6 +798,155 @@ const Settings = () => {
                           <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
                         Şifreyi Güncelle
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {activeTab === 'appVersion' && (
+            <div className="app-version-section">
+              <div className="section-header">
+                <h2>Uygulama Versiyonu Yönetimi</h2>
+                <p>Mobil uygulama güncelleme ayarlarını yönetin</p>
+              </div>
+
+              <div className="version-info-card">
+                <div className="info-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                  </svg>
+                </div>
+                <div className="info-content">
+                  <strong>Zorunlu Güncelleme Nasıl Çalışır?</strong>
+                  <p>Kullanıcılar uygulamayı açtığında, minimum versiyon altındaki sürümler güncelleme yapmadan uygulamayı kullanamaz.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAppVersionUpdate} className="app-version-form">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>
+                      <span className="label-icon">📱</span>
+                      En Son Versiyon
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="1.0.6"
+                      value={appVersionData.latestVersion}
+                      onChange={(e) => setAppVersionData(prev => ({ ...prev, latestVersion: e.target.value }))}
+                      required
+                    />
+                    <small>Mağazalardaki en güncel versiyon numarası (örn: 1.0.6)</small>
+                  </div>
+
+                  <div className="form-group">
+                    <label>
+                      <span className="label-icon">⚠️</span>
+                      Minimum Versiyon
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="1.0.5"
+                      value={appVersionData.minimumVersion}
+                      onChange={(e) => setAppVersionData(prev => ({ ...prev, minimumVersion: e.target.value }))}
+                    />
+                    <small>Bu versiyonun altındaki kullanıcılar güncelleme yapmak zorundadır</small>
+                  </div>
+                </div>
+
+                <div className="form-group toggle-group">
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={appVersionData.forceUpdate}
+                      onChange={(e) => setAppVersionData(prev => ({ ...prev, forceUpdate: e.target.checked }))}
+                    />
+                    <span className="toggle-switch"></span>
+                    <span className="toggle-text">
+                      <strong>Zorunlu Güncelleme</strong>
+                      <small>Aktif olduğunda tüm eski sürüm kullanıcıları güncelleme yapmak zorunda kalır</small>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    <span className="label-icon">🇬🇧</span>
+                    Güncelleme Mesajı (İngilizce)
+                  </label>
+                  <textarea
+                    placeholder="A new version with exciting features is available. Please update to continue."
+                    value={appVersionData.updateMessage}
+                    onChange={(e) => setAppVersionData(prev => ({ ...prev, updateMessage: e.target.value }))}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    <span className="label-icon">🇹🇷</span>
+                    Güncelleme Mesajı (Türkçe)
+                  </label>
+                  <textarea
+                    placeholder="Yeni özellikler içeren yeni bir versiyon mevcut. Devam etmek için lütfen güncelleyin."
+                    value={appVersionData.updateMessageTr}
+                    onChange={(e) => setAppVersionData(prev => ({ ...prev, updateMessageTr: e.target.value }))}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>
+                      <span className="label-icon">🍎</span>
+                      App Store URL (iOS)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://apps.apple.com/app/zenith-studio/id..."
+                      value={appVersionData.iosUrl}
+                      onChange={(e) => setAppVersionData(prev => ({ ...prev, iosUrl: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>
+                      <span className="label-icon">🤖</span>
+                      Play Store URL (Android)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://play.google.com/store/apps/details?id=..."
+                      value={appVersionData.androidUrl}
+                      onChange={(e) => setAppVersionData(prev => ({ ...prev, androidUrl: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-actions">
+                  <button 
+                    type="submit" 
+                    className="save-button"
+                    disabled={appVersionLoading}
+                  >
+                    {appVersionLoading ? (
+                      <>
+                        <div className="button-spinner"></div>
+                        Kaydediliyor...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                          <polyline points="17,21 17,13 7,13 7,21"/>
+                          <polyline points="7,3 7,8 15,8"/>
+                        </svg>
+                        Ayarları Kaydet
                       </>
                     )}
                   </button>

@@ -233,9 +233,12 @@ const Members = () => {
   };
 
   const handleSaveEdit = async (formData) => {
+    console.log('🎯 handleSaveEdit called with:', formData);
+    console.log('🎯 selectedMember:', selectedMember?.id);
     try {
       setIsProcessing(true);
       const result = await memberService.updateMember(selectedMember.id, formData);
+      console.log('🎯 updateMember result:', result);
 
       if (result.success) {
         await loadMembers();
@@ -490,13 +493,14 @@ const Members = () => {
   };
 
   const getPackageExpiryDate = (member) => {
-    // First check packages array (new multi-package system)
-    const activePackage = getActivePackageFromArray(member);
-    let rawExpiry = activePackage?.expiryDate;
+    // Use root-level packageExpiryDate first - this is already set to the latest expiry
+    // across all packages when packages are renewed/added
+    let rawExpiry = member.packageExpiryDate || member.packageInfo?.expiryDate;
     
-    // Fallback to legacy fields
+    // Fallback to packages array if root level doesn't exist
     if (!rawExpiry) {
-      rawExpiry = member.packageExpiryDate || member.packageInfo?.expiryDate;
+      const activePackage = getActivePackageFromArray(member);
+      rawExpiry = activePackage?.expiryDate;
     }
     
     if (!rawExpiry) return null;

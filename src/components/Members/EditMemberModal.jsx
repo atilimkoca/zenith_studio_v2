@@ -5,6 +5,18 @@ import packageService from '../../services/packageService';
 import memberService from '../../services/memberService';
 
 const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false }) => {
+  // Helper to format date for input field (YYYY-MM-DD)
+  const formatDateForInput = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return '';
+      return date.toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  };
+
   const [formData, setFormData] = useState({
     firstName: member?.firstName || '',
     lastName: member?.lastName || '',
@@ -14,8 +26,13 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
     packageId: member?.packageId || '',
     packageName: member?.packageName || '',
     remainingClasses: member?.remainingClasses || 0,
-    membershipStatus: member?.membershipStatus || 'active'
+    membershipStatus: member?.membershipStatus || 'active',
+    packageStartDate: formatDateForInput(member?.packageStartDate),
+    packageExpiryDate: formatDateForInput(member?.packageExpiryDate)
   });
+
+  // Store package duration for auto-calculating expiry
+  const [packageDuration, setPackageDuration] = useState(1);
 
   const [errors, setErrors] = useState({});
   const [packages, setPackages] = useState([]);
@@ -126,11 +143,21 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
         packageId: member.packageId || '',
         packageName: member.packageName || '',
         remainingClasses: member.remainingClasses || 0,
-        membershipStatus: member.membershipStatus || 'active'
+        membershipStatus: member.membershipStatus || 'active',
+        packageStartDate: formatDateForInput(member.packageStartDate),
+        packageExpiryDate: formatDateForInput(member.packageExpiryDate)
       });
       setErrors({});
+
+      // Get package duration if package exists
+      if (member.packageId && packages.length > 0) {
+        const pkg = packages.find(p => p.id === member.packageId);
+        if (pkg) {
+          setPackageDuration(Number(pkg.duration) || 1);
+        }
+      }
     }
-  }, [member]);
+  }, [member, packages]);
 
   const validateForm = () => {
     const newErrors = {};
@@ -401,10 +428,12 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
                           className={`package-selection-card ${isSelected ? 'selected' : ''}`}
                           onClick={() => {
                             setSelectedPackageId(pkg.id);
-                            // Update remainingClasses to show selected package's remaining
+                            // Update remainingClasses and dates to show selected package's values
                             setFormData(prev => ({
                               ...prev,
-                              remainingClasses: pkg.remainingLessons || 0
+                              remainingClasses: pkg.remainingLessons || 0,
+                              packageStartDate: formatDateForInput(pkg.startDate),
+                              packageExpiryDate: formatDateForInput(pkg.expiryDate)
                             }));
                             // Clear selection error
                             if (errors.packageSelection) {
@@ -457,6 +486,64 @@ const EditMemberModal = ({ isOpen, onClose, member, onSave, isLoading = false })
                   disabled={isLoading}
                 />
                 {errors.remainingClasses && <span className="error-message">{errors.remainingClasses}</span>}
+              </div>
+            </div>
+
+            {/* Package Dates */}
+            <div className="form-row form-row-dates">
+              <div className="form-group">
+                <label htmlFor="packageStartDate">
+                  Paket Başlangıç Tarihi
+                  {selectedPackageId && activePackages.length > 1 && (
+                    <span className="selected-package-label">
+                      {' '}(Seçili Paket)
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="date"
+                  id="packageStartDate"
+                  name="packageStartDate"
+                  value={formData.packageStartDate}
+                  onChange={(e) => {
+                    const newStartDate = e.target.value;
+                    setFormData(prev => {
+                      // Calculate new expiry date based on duration
+                      let newExpiryDate = prev.packageExpiryDate;
+                      if (newStartDate) {
+                        const startDate = new Date(newStartDate);
+                        // Use 30 days per month for consistency
+                        const expiryDate = new Date(startDate);
+                        expiryDate.setDate(expiryDate.getDate() + (packageDuration * 30));
+                        newExpiryDate = expiryDate.toISOString().split('T')[0];
+                      }
+                      return {
+                        ...prev,
+                        packageStartDate: newStartDate,
+                        packageExpiryDate: newExpiryDate
+                      };
+                    });
+                  }}
+                  disabled={isLoading}
+                />
+                <small className="date-hint">Tarihi değiştirdiğinizde bitiş tarihi otomatik güncellenir</small>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="packageExpiryDate">Paket Bitiş Tarihi</label>
+                <input
+                  type="date"
+                  id="packageExpiryDate"
+                  name="packageExpiryDate"
+                  value={formData.packageExpiryDate}
+                  onChange={(e) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      packageExpiryDate: e.target.value
+                    }));
+                  }}
+                  disabled={isLoading}
+                />
               </div>
             </div>
 

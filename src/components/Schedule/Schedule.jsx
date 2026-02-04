@@ -1268,8 +1268,11 @@ const Schedule = () => {
           participantId
         );
         
+        console.log('🔄 Remove participant result:', result);
+        
         if (result.success) {
-          showNotification('Katılımcı dersten çıkarıldı! 🎉', 'success');
+          // Use the detailed message from the service which includes refund info
+          showNotification(result.message || 'Katılımcı dersten çıkarıldı! 🎉', 'success');
           
           // Update the selected lesson data
           const updatedParticipants = selectedLessonForDetail.participants.filter(

@@ -739,7 +739,11 @@ class MemberService {
 
   // Update member information
   async updateMember(memberId, updateData = {}) {
+    console.log('🚀 updateMember ENTRY POINT - memberId:', memberId);
+    console.log('🚀 updateMember ENTRY POINT - updateData:', JSON.stringify(updateData, null, 2));
     try {
+      console.log('📝 updateMember called:', { memberId, updateData });
+      
       // Determine which collection the member belongs to
       const memberRef = doc(db, this.membersCollection, memberId);
       const memberDoc = await getDoc(memberRef);
@@ -751,11 +755,13 @@ class MemberService {
       if (memberDoc.exists()) {
         currentData = memberDoc.data();
         usesMembersCollection = true;
+        console.log('📂 Found in members collection');
       } else {
         const userRef = doc(db, 'users', memberId);
         const userDoc = await getDoc(userRef);
         
         if (!userDoc.exists()) {
+          console.error('❌ Member not found:', memberId);
           return {
             success: false,
             error: 'Üye bulunamadı'
@@ -764,7 +770,11 @@ class MemberService {
 
         targetRef = userRef;
         currentData = userDoc.data();
+        console.log('📂 Found in users collection');
       }
+      
+      console.log('📦 Current packages:', currentData?.packages?.length || 0);
+      console.log('📊 Current remainingClasses:', currentData?.remainingClasses);
 
       // Clean payload (Firestore rejects undefined)
       const sanitizedData = {};
@@ -791,21 +801,57 @@ class MemberService {
       const hasSelectedPackageId = Object.prototype.hasOwnProperty.call(sanitizedData, 'selectedPackageId');
       const hasRemainingClasses = Object.prototype.hasOwnProperty.call(sanitizedData, 'remainingClasses');
       
+      // Determine if we're editing remaining classes on an existing package vs assigning a new package
+      // If packageId is different from current, user is assigning a NEW package
+      const isAssigningNewPackage = hasPackageId && sanitizedData.packageId && sanitizedData.packageId !== currentData?.packageId;
+      
       // If selectedPackageId is provided, prioritize multi-package update logic
       // This handles the case when editing remainingClasses from the edit modal
-      if (hasSelectedPackageId || (hasRemainingClasses && !hasPackageId) || (hasRemainingClasses && hasPackageId && sanitizedData.packageId === currentData?.packageId)) {
+      console.log('🔍 Update conditions:', { hasSelectedPackageId, hasRemainingClasses, hasPackageId, isAssigningNewPackage });
+      console.log('🔍 selectedPackageId:', sanitizedData.selectedPackageId);
+      console.log('🔍 packageId:', sanitizedData.packageId, 'current:', currentData?.packageId);
+      
+      // Use multi-package update if:
+      // 1. selectedPackageId is explicitly provided (from multi-package UI)
+      // 2. OR remainingClasses is being updated without assigning a new package
+      if (hasSelectedPackageId || (hasRemainingClasses && !isAssigningNewPackage)) {
+        console.log('✅ Taking multi-package update path');
+        
         // Check if we need to update a specific package (multi-package support)
         const selectedPackageId = sanitizedData.selectedPackageId;
         delete sanitizedData.selectedPackageId; // Remove from update data
 
-        if (selectedPackageId && currentData?.packages && Array.isArray(currentData.packages)) {
-          // Update the specific package's remainingLessons in the packages array
+        // Check if user has packages array with actual packages
+        const hasPackagesArray = currentData?.packages && Array.isArray(currentData.packages) && currentData.packages.length > 0;
+        
+        if (selectedPackageId && hasPackagesArray) {
+          console.log('📦 Updating specific package:', selectedPackageId);
+          
+          // Update the specific package's remainingLessons and dates in the packages array
           const updatedPackages = currentData.packages.map(pkg => {
             if (pkg.id === selectedPackageId) {
-              return {
+              console.log(`📈 Package ${pkg.packageName} (status: ${pkg.status}): ${pkg.remainingLessons} -> ${sanitizedData.remainingClasses}`);
+              const updatedPkg = {
                 ...pkg,
                 remainingLessons: sanitizedData.remainingClasses
               };
+              
+              // Update dates if provided
+              if (sanitizedData.packageStartDate) {
+                console.log(`📅 Updating startDate: ${pkg.startDate} -> ${sanitizedData.packageStartDate}`);
+                updatedPkg.startDate = new Date(sanitizedData.packageStartDate).toISOString();
+              }
+              if (sanitizedData.packageExpiryDate) {
+                console.log(`📅 Updating expiryDate: ${pkg.expiryDate} -> ${sanitizedData.packageExpiryDate}`);
+                updatedPkg.expiryDate = new Date(sanitizedData.packageExpiryDate).toISOString();
+              }
+              
+              // If the package was cancelled but we're adding lessons, reactivate it
+              if (pkg.status === 'cancelled' && sanitizedData.remainingClasses > 0) {
+                console.log('🔄 Reactivating cancelled package');
+                updatedPkg.status = 'active';
+              }
+              return updatedPkg;
             }
             return pkg;
           });
@@ -817,18 +863,46 @@ class MemberService {
             }
             return sum;
           }, 0);
+          
+          console.log('📊 Total remaining after update:', totalRemaining);
 
           // Update packages array and root level fields
           sanitizedData.packages = updatedPackages;
           sanitizedData.remainingClasses = totalRemaining;
           sanitizedData.lessonCredits = totalRemaining;
           
+          // Update root-level packageExpiryDate to the latest expiry among all packages
+          const nonCancelledPackages = updatedPackages.filter(p => p.status !== 'cancelled');
+          if (nonCancelledPackages.length > 0) {
+            const latestExpiry = nonCancelledPackages.reduce((latest, pkg) => {
+              const pkgExpiry = new Date(pkg.expiryDate);
+              return pkgExpiry > latest ? pkgExpiry : latest;
+            }, new Date(0));
+            
+            if (latestExpiry.getTime() > 0) {
+              sanitizedData.packageExpiryDate = latestExpiry.toISOString();
+            }
+          }
+          
           // Also update packageInfo.remainingClasses to keep in sync
           sanitizedData['packageInfo.remainingClasses'] = totalRemaining;
-        } else if (currentData?.packages && Array.isArray(currentData.packages) && currentData.packages.length > 0) {
+          
+          // Remove packageStartDate from sanitizedData so it doesn't overwrite root level
+          delete sanitizedData.packageStartDate;
+        } else if (hasPackagesArray) {
+          console.log('📦 No specific package selected, finding first active package...');
+          
           // No specific package selected but has packages - update the first active package
           const today = new Date();
           today.setHours(0, 0, 0, 0);
+          
+          console.log('📦 All packages:', currentData.packages.map(p => ({
+            id: p.id,
+            name: p.packageName,
+            remaining: p.remainingLessons,
+            status: p.status,
+            expiry: p.expiryDate
+          })));
           
           let targetPackage = currentData.packages.find(pkg => {
             if (pkg.status === 'cancelled') return false;
@@ -836,22 +910,40 @@ class MemberService {
             return expiryDate >= today;
           });
           
-          // If no active package, use the last one
+          // If no active package, use the last NON-CANCELLED one, or last one if all cancelled
           if (!targetPackage) {
-            targetPackage = currentData.packages[currentData.packages.length - 1];
+            console.log('⚠️ No active package found, looking for last non-cancelled package');
+            // Find last non-cancelled package
+            const nonCancelledPackages = currentData.packages.filter(p => p.status !== 'cancelled');
+            if (nonCancelledPackages.length > 0) {
+              targetPackage = nonCancelledPackages[nonCancelledPackages.length - 1];
+            } else {
+              // All packages are cancelled, use the last one anyway
+              console.log('⚠️ All packages cancelled, using last package');
+              targetPackage = currentData.packages[currentData.packages.length - 1];
+            }
           }
+          
+          console.log(`📈 Target package ${targetPackage?.packageName} (status: ${targetPackage?.status}): ${targetPackage?.remainingLessons} -> ${sanitizedData.remainingClasses}`);
           
           const updatedPackages = currentData.packages.map(pkg => {
             if (pkg.id === targetPackage.id) {
-              return {
+              const updatedPkg = {
                 ...pkg,
                 remainingLessons: sanitizedData.remainingClasses
               };
+              // If the package was cancelled but we're adding lessons, reactivate it
+              if (pkg.status === 'cancelled' && sanitizedData.remainingClasses > 0) {
+                console.log('🔄 Reactivating cancelled package');
+                updatedPkg.status = 'active';
+              }
+              return updatedPkg;
             }
             return pkg;
           });
           
           // Calculate total remaining from all non-cancelled packages
+          // After updates, recalculate based on updated statuses
           const totalRemaining = updatedPackages.reduce((sum, pkg) => {
             if (pkg.status !== 'cancelled') {
               return sum + (pkg.remainingLessons || 0);
@@ -859,19 +951,41 @@ class MemberService {
             return sum;
           }, 0);
           
+          console.log('📊 Updated packages:', updatedPackages.map(p => ({
+            name: p.packageName,
+            remaining: p.remainingLessons,
+            status: p.status
+          })));
+          
           sanitizedData.packages = updatedPackages;
           sanitizedData.remainingClasses = totalRemaining;
           sanitizedData.lessonCredits = totalRemaining;
           sanitizedData['packageInfo.remainingClasses'] = totalRemaining;
+          
+          console.log('📊 Total remaining after update:', totalRemaining);
         } else {
+          console.log('📦 No packages array - updating root level only');
           // No packages array - update root level only
           sanitizedData.lessonCredits = sanitizedData.remainingClasses;
+          
+          // Update dates if provided
+          if (sanitizedData.packageStartDate) {
+            console.log(`📅 Updating root packageStartDate: ${sanitizedData.packageStartDate}`);
+            sanitizedData.packageStartDate = new Date(sanitizedData.packageStartDate).toISOString();
+          }
+          if (sanitizedData.packageExpiryDate) {
+            console.log(`📅 Updating root packageExpiryDate: ${sanitizedData.packageExpiryDate}`);
+            sanitizedData.packageExpiryDate = new Date(sanitizedData.packageExpiryDate).toISOString();
+          }
+          
           // Also update packageInfo if it exists
           if (currentData?.packageInfo) {
             sanitizedData['packageInfo.remainingClasses'] = sanitizedData.remainingClasses;
           }
+          console.log('📊 New remainingClasses:', sanitizedData.remainingClasses);
         }
       } else if (hasPackageId) {
+        console.log('📦 Taking packageId update path');
         if (sanitizedData.packageId) {
           const packageRef = doc(db, 'packages', sanitizedData.packageId);
           const packageDoc = await getDoc(packageRef);
@@ -2656,6 +2770,46 @@ class MemberService {
    */
   async deductLessonFromPackage(userId, lessonDate, lessonInfo = '') {
     try {
+      // First, get the user data directly to check for legacy structure
+      let targetRef = doc(db, this.membersCollection, userId);
+      let targetDoc = await getDoc(targetRef);
+
+      if (!targetDoc.exists()) {
+        targetRef = doc(db, 'users', userId);
+        targetDoc = await getDoc(targetRef);
+      }
+
+      if (!targetDoc.exists()) {
+        return { success: false, error: 'Kullanıcı bulunamadı' };
+      }
+
+      const userData = targetDoc.data();
+      
+      // Check if user has packages array or packageInfo
+      const hasPackages = userData.packages && Array.isArray(userData.packages) && userData.packages.length > 0;
+      const hasPackageInfo = userData.packageInfo && Object.keys(userData.packageInfo).length > 0;
+      
+      // If no packages array and no packageInfo, use legacy deduction
+      if (!hasPackages && !hasPackageInfo) {
+        const currentCredits = userData.remainingClasses || userData.lessonCredits || 0;
+        if (currentCredits <= 0) {
+          return { success: false, error: 'Kalan ders hakkı yok' };
+        }
+        console.log('⚠️ No packages, using legacy deduction. Current:', currentCredits, 'New:', currentCredits - 1);
+        await updateDoc(targetRef, {
+          remainingClasses: currentCredits - 1,
+          lessonCredits: currentCredits - 1,
+          updatedAt: serverTimestamp()
+        });
+        return {
+          success: true,
+          message: 'Ders düşüldü (legacy)',
+          usedLegacyDeduction: true,
+          totalRemaining: currentCredits - 1
+        };
+      }
+      
+      // User has packages - use normal flow
       const packagesResult = await this.getUserPackages(userId);
       if (!packagesResult.success) {
         return { success: false, error: packagesResult.error };
@@ -2678,20 +2832,6 @@ class MemberService {
         return { success: false, error: 'Pakette kalan ders yok' };
       }
 
-      // Find user document
-      let targetRef = doc(db, this.membersCollection, userId);
-      let targetDoc = await getDoc(targetRef);
-
-      if (!targetDoc.exists()) {
-        targetRef = doc(db, 'users', userId);
-        targetDoc = await getDoc(targetRef);
-      }
-
-      if (!targetDoc.exists()) {
-        return { success: false, error: 'Kullanıcı bulunamadı' };
-      }
-
-      const userData = targetDoc.data();
       const packages = userData.packages || [];
 
       // Update the specific package
@@ -2708,7 +2848,6 @@ class MemberService {
       });
 
       // Calculate new total remaining from ALL non-cancelled packages
-      // FIXED: Include all packages regardless of date to show accurate total credits
       const totalRemainingClasses = updatedPackages.reduce((sum, pkg) => {
         if (pkg.status !== 'cancelled') {
           return sum + (pkg.remainingLessons || 0);
@@ -2749,6 +2888,8 @@ class MemberService {
    */
   async refundLessonToPackage(userId, lessonDate, lessonInfo = '') {
     try {
+      console.log('💰 refundLessonToPackage called:', { userId, lessonDate, lessonInfo });
+      
       // Find user document
       let targetRef = doc(db, this.membersCollection, userId);
       let targetDoc = await getDoc(targetRef);
@@ -2759,11 +2900,14 @@ class MemberService {
       }
 
       if (!targetDoc.exists()) {
+        console.error('❌ User not found:', userId);
         return { success: false, error: 'Kullanıcı bulunamadı' };
       }
 
       const userData = targetDoc.data();
       let packages = userData.packages || [];
+      
+      console.log('📦 User packages:', packages.length, 'Current remainingClasses:', userData.remainingClasses);
 
       // If no packages array, try to use legacy packageInfo
       if (packages.length === 0 && userData.packageInfo) {
@@ -2776,6 +2920,7 @@ class MemberService {
       if (packages.length === 0) {
         // Fallback: just increment the legacy fields
         const currentCredits = userData.remainingClasses || userData.lessonCredits || 0;
+        console.log('⚠️ No packages, using legacy refund. Current:', currentCredits, 'New:', currentCredits + 1);
         await updateDoc(targetRef, {
           remainingClasses: currentCredits + 1,
           lessonCredits: currentCredits + 1,
@@ -2803,6 +2948,7 @@ class MemberService {
 
       // If no package covers the date, use the most recent active package
       if (!targetPackage) {
+        console.log('⚠️ No package found for date, using fallback...');
         const now = new Date();
         const activePackages = packages.filter(pkg => {
           const expiryDate = new Date(pkg.expiryDate);
@@ -2816,12 +2962,15 @@ class MemberService {
           targetPackage = packages[packages.length - 1];
         }
       }
+      
+      console.log('🎯 Target package for refund:', targetPackage?.packageName, 'Current remaining:', targetPackage?.remainingLessons);
 
       // Update the specific package
       const updatedPackages = packages.map(pkg => {
         if (pkg.id === targetPackage.id) {
           const newRemaining = (pkg.remainingLessons || 0) + 1;
           const maxLessons = pkg.totalLessons || newRemaining;
+          console.log('📈 Updating package remaining:', pkg.remainingLessons, '->', Math.min(newRemaining, maxLessons));
           return {
             ...pkg,
             remainingLessons: Math.min(newRemaining, maxLessons),
@@ -2840,6 +2989,8 @@ class MemberService {
         }
         return sum;
       }, 0);
+      
+      console.log('📊 New total remaining classes:', totalRemainingClasses);
 
       // Build update data including packageInfo sync
       const updateData = {

@@ -158,6 +158,40 @@
   font-weight: 500;
 }
 
+.date-hint {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Date inputs alignment - ensure inputs are at the same level */
+.form-row-dates {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.form-row-dates .form-group {
+  flex: 1;
+}
+
+.form-row-dates .form-group input[type="date"] {
+  margin-bottom: 0;
+}
+
+.form-row-dates .form-group:first-child .date-hint {
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+}
+
+.form-row-dates .form-group:first-child {
+  position: relative;
+  padding-bottom: 20px;
+}
+
 .edit-modal-footer {
   display: flex;
   justify-content: flex-end;
