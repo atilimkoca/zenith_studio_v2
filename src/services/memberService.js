@@ -1520,10 +1520,11 @@ class MemberService {
         if (!updatedPackageInfo) {
           const packageStartRaw = memberData.packageStartDate || memberData.packageInfo?.assignedAt || freezeStartDateISO;
           const normalizedPackageStart = parseDateValue(packageStartRaw) || freezeStartDate;
+          // FIXED: Use totalClasses/totalLessons for lessonCount, not current remaining
           updatedPackageInfo = {
             packageId: memberData.packageId || null,
             packageName: memberData.packageName || null,
-            lessonCount: memberData.lessonCredits || memberData.remainingClasses || 0,
+            lessonCount: memberData.totalClasses || memberData.totalLessons || memberData.lessonCredits || memberData.remainingClasses || 0,
             assignedAt: normalizedPackageStart.toISOString()
           };
         }
@@ -1895,10 +1896,11 @@ class MemberService {
         if (!updatedPackageInfo) {
           const packageStartRaw = memberData.packageStartDate || memberData.packageInfo?.assignedAt || now.toISOString();
           const normalizedPackageStart = parseDateValue(packageStartRaw) || now;
+          // FIXED: Use totalClasses/totalLessons for lessonCount, not current remaining
           updatedPackageInfo = {
             packageId: memberData.packageId || null,
             packageName: memberData.packageName || null,
-            lessonCount: memberData.lessonCredits || memberData.remainingClasses || 0,
+            lessonCount: memberData.totalClasses || memberData.totalLessons || memberData.lessonCredits || memberData.remainingClasses || 0,
             assignedAt: normalizedPackageStart.toISOString(),
             expiryDate: recalculatedExpiryISO
           };
@@ -2832,7 +2834,12 @@ class MemberService {
         return { success: false, error: 'Pakette kalan ders yok' };
       }
 
-      const packages = userData.packages || [];
+      // FIXED: Use packagesResult.packages (which includes migrated legacy packages)
+      // instead of userData.packages which may be empty for legacy users.
+      // Previously, if packages[] was empty but packageInfo existed, getUserPackages()
+      // created a virtual legacy package in memory, but then we mapped over the
+      // empty userData.packages array — resulting in totalRemainingClasses = 0.
+      const packages = packagesResult.packages;
 
       // Update the specific package
       const updatedPackages = packages.map(pkg => {
@@ -3090,7 +3097,14 @@ class MemberService {
       packageType: packageInfo.packageType || userData.packageType || 'group',
       startDate: userData.packageStartDate || packageInfo.assignedAt || userData.approvedAt || new Date().toISOString(),
       expiryDate: userData.packageExpiryDate || packageInfo.expiryDate || new Date().toISOString(),
-      totalLessons: packageInfo.lessonCount || remainingClasses,
+      // FIXED: Check root-level totals BEFORE packageInfo.lessonCount since lessonCount\n      // may have been incorrectly set to remaining by a previous migration
+      totalLessons: userData.totalLessons ||
+                    userData.totalClasses ||
+                    packageInfo.totalLessons ||
+                    packageInfo.lessonCount ||
+                    packageInfo.classes ||
+                    packageInfo.sessions ||
+                    remainingClasses,
       remainingLessons: remainingClasses,
       assignedAt: packageInfo.assignedAt || userData.approvedAt || new Date().toISOString(),
       assignedBy: userData.approvedBy || 'system_migration',
@@ -3230,12 +3244,21 @@ class MemberService {
       if (!userData.packageInfo || userData.packageInfo.remainingClasses === undefined || 
           (correctPackageName && userData.packageInfo.packageName !== correctPackageName)) {
         needsUpdate = true;
+        // FIXED: Use totalLessons/totalClasses for lessonCount instead of falling back to actualRemaining
+        // actualRemaining is the CURRENT credits, not the original total
+        // Check root-level totals BEFORE packageInfo.lessonCount since lessonCount
+        // may have been incorrectly set to remaining by a previous migration
+        const correctLessonCount = activePackage?.totalLessons ||
+          userData.totalLessons ||
+          userData.totalClasses ||
+          userData.packageInfo?.lessonCount ||
+          actualRemaining;
         updateData.packageInfo = {
           ...(userData.packageInfo || {}),
           packageId: realPackageId || activePackage?.packageId || userData.packageInfo?.packageId || `migrated_${Date.now()}`,
           packageName: correctPackageName,
           packageType: correctPackageType,
-          lessonCount: userData.packageInfo?.lessonCount || actualRemaining,
+          lessonCount: correctLessonCount,
           remainingClasses: actualRemaining,
           assignedAt: activePackage?.assignedAt || userData.packageInfo?.assignedAt || userData.packageStartDate || userData.approvedAt || new Date().toISOString(),
           expiryDate: correctExpiryDate || new Date().toISOString()
