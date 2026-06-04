@@ -1450,34 +1450,52 @@ class MemberService {
   }
 
   // Freeze membership
-  async freezeMembership(memberId, freezeData) {
+  async freezeMembership(memberId, freezeData, context = null) {
     try {
       const { reason, freezeEndDate, frozenBy, freezeType = 'individual' } = freezeData;
-      
+
       let memberData = null;
       let memberRef = null;
-      
-      // Check if it's in members collection first
-      const memberDocRef = doc(db, this.membersCollection, memberId);
-      const memberDoc = await getDoc(memberDocRef);
-      
-      if (memberDoc.exists()) {
-        memberData = memberDoc.data();
-        memberRef = memberDocRef;
-      } else {
-        // Check if it's a user in users collection
-        const userRef = doc(db, 'users', memberId);
-        const userDoc = await getDoc(userRef);
-        
-        if (!userDoc.exists()) {
-          return {
-            success: false,
-            error: 'Üye bulunamadı'
-          };
-        }
 
-        memberData = userDoc.data();
-        memberRef = userRef;
+      // Use prefetched data when the caller (e.g. bulk freeze) already loaded the
+      // document — avoids a redundant getDoc per member.
+      if (context && context.data && context.ref) {
+        memberData = context.data;
+        memberRef = context.ref;
+      } else {
+        // Check if it's in members collection first
+        const memberDocRef = doc(db, this.membersCollection, memberId);
+        const memberDoc = await getDoc(memberDocRef);
+
+        if (memberDoc.exists()) {
+          memberData = memberDoc.data();
+          memberRef = memberDocRef;
+        } else {
+          // Check if it's a user in users collection
+          const userRef = doc(db, 'users', memberId);
+          const userDoc = await getDoc(userRef);
+
+          if (!userDoc.exists()) {
+            return {
+              success: false,
+              error: 'Üye bulunamadı'
+            };
+          }
+
+          memberData = userDoc.data();
+          memberRef = userRef;
+        }
+      }
+
+      // Guard: never freeze an already-frozen membership. Re-freezing would corrupt
+      // originalMembershipData (storing 'frozen' as the original) and double-extend
+      // the package expiry.
+      if (memberData.membershipStatus === 'frozen' || memberData.status === 'frozen') {
+        return {
+          success: false,
+          error: 'Üyelik zaten dondurulmuş',
+          alreadyFrozen: true
+        };
       }
 
       const freezeStartDate = new Date();
@@ -1531,6 +1549,22 @@ class MemberService {
         updatedPackageInfo.expiryDate = extendedExpiryISO;
       }
 
+      // Extend the packages[] array too — it is the source of truth for the
+      // membership expiry. packageExpiryDate/packageInfo above are only cached
+      // copies that get recomputed from packages[] on renew/edit, so extending
+      // them alone makes the freeze invisible and short-lived.
+      let extendedPackages = null;
+      if (Array.isArray(memberData.packages) && freezeDurationDays > 0) {
+        extendedPackages = memberData.packages.map((pkg) => {
+          if (pkg.status === 'cancelled') return pkg;
+          const pkgExpiry = parseDateValue(pkg.expiryDate);
+          if (!pkgExpiry) return pkg;
+          const newExpiry = new Date(pkgExpiry);
+          newExpiry.setDate(newExpiry.getDate() + freezeDurationDays);
+          return { ...pkg, expiryDate: newExpiry.toISOString() };
+        });
+      }
+
       // Freeze membership
       const freezeDataObj = {
         membershipStatus: 'frozen',
@@ -1546,6 +1580,9 @@ class MemberService {
           membershipType: memberData.membershipType || 'basic',
           remainingClasses: memberData.remainingClasses || 0,
           membershipStatus: memberData.membershipStatus || memberData.status || 'active',
+          // Preserve the original top-level status so unfreeze can restore it
+          // instead of forcing everyone to 'approved'.
+          status: memberData.status || 'approved',
           packageExpiryDate: memberData.packageExpiryDate || memberData.packageInfo?.expiryDate || null
         },
         updatedAt: serverTimestamp()
@@ -1554,6 +1591,10 @@ class MemberService {
       if (extendedExpiryISO) {
         freezeDataObj.packageExpiryDate = extendedExpiryISO;
         freezeDataObj.packageInfo = updatedPackageInfo;
+      }
+
+      if (extendedPackages) {
+        freezeDataObj.packages = extendedPackages;
       }
 
       await updateDoc(memberRef, freezeDataObj);
@@ -1625,11 +1666,11 @@ class MemberService {
       );
 
       const snapshots = [
-        { docs: membersSnapshot.docs },
-        { docs: usersSnapshot.docs }
+        { docs: membersSnapshot.docs, collectionName: this.membersCollection },
+        { docs: usersSnapshot.docs, collectionName: 'users' }
       ];
 
-      for (const { docs } of snapshots) {
+      for (const { docs, collectionName } of snapshots) {
         for (const docSnap of docs) {
           const memberId = docSnap.id;
           if (processedIds.has(memberId)) {
@@ -1649,6 +1690,15 @@ class MemberService {
             continue;
           }
 
+          // Only freeze active/approved memberships. Pending or rejected members
+          // are not active and must not be swept into a bulk freeze (and silently
+          // approved on unfreeze).
+          if (data.status === 'pending' || data.membershipStatus === 'pending' ||
+              data.status === 'rejected' || data.membershipStatus === 'rejected') {
+            skippedCount += 1;
+            continue;
+          }
+
           if (data.membershipStatus === 'frozen' || data.status === 'frozen') {
             alreadyFrozenCount += 1;
             continue;
@@ -1656,7 +1706,10 @@ class MemberService {
 
           eligibleCount += 1;
 
-          const freezeResult = await this.freezeMembership(memberId, sanitizedPayload);
+          const freezeResult = await this.freezeMembership(memberId, sanitizedPayload, {
+            data,
+            ref: doc(db, collectionName, memberId)
+          });
           if (freezeResult.success) {
             frozenCount += 1;
           } else {
@@ -1721,11 +1774,11 @@ class MemberService {
       );
 
       const snapshots = [
-        { docs: membersSnapshot.docs },
-        { docs: usersSnapshot.docs }
+        { docs: membersSnapshot.docs, collectionName: this.membersCollection },
+        { docs: usersSnapshot.docs, collectionName: 'users' }
       ];
 
-      for (const { docs } of snapshots) {
+      for (const { docs, collectionName } of snapshots) {
         for (const docSnap of docs) {
           const memberId = docSnap.id;
           if (processedIds.has(memberId)) {
@@ -1755,7 +1808,10 @@ class MemberService {
           frozenCount += 1;
 
           const options = sanitizedReason ? { reason: sanitizedReason } : {};
-          const unfreezeResult = await this.unfreezeMembership(memberId, actor, options);
+          const unfreezeResult = await this.unfreezeMembership(memberId, actor, options, {
+            data,
+            ref: doc(db, collectionName, memberId)
+          });
           if (unfreezeResult.success) {
             unfrozenCount += 1;
           } else {
@@ -1802,33 +1858,40 @@ class MemberService {
   }
 
   // Unfreeze membership
-  async unfreezeMembership(memberId, unfrozenBy, options = {}) {
+  async unfreezeMembership(memberId, unfrozenBy, options = {}, context = null) {
     try {
       const { reason } = options || {};
       let memberData = null;
       let memberRef = null;
-      
-      // Check if it's in members collection first
-      const memberDocRef = doc(db, this.membersCollection, memberId);
-      const memberDoc = await getDoc(memberDocRef);
-      
-      if (memberDoc.exists()) {
-        memberData = memberDoc.data();
-        memberRef = memberDocRef;
-      } else {
-        // Check if it's a user in users collection
-        const userRef = doc(db, 'users', memberId);
-        const userDoc = await getDoc(userRef);
-        
-        if (!userDoc.exists()) {
-          return {
-            success: false,
-            error: 'Üye bulunamadı'
-          };
-        }
 
-        memberData = userDoc.data();
-        memberRef = userRef;
+      // Use prefetched data when the caller (e.g. bulk unfreeze) already loaded the
+      // document — avoids a redundant getDoc per member.
+      if (context && context.data && context.ref) {
+        memberData = context.data;
+        memberRef = context.ref;
+      } else {
+        // Check if it's in members collection first
+        const memberDocRef = doc(db, this.membersCollection, memberId);
+        const memberDoc = await getDoc(memberDocRef);
+
+        if (memberDoc.exists()) {
+          memberData = memberDoc.data();
+          memberRef = memberDocRef;
+        } else {
+          // Check if it's a user in users collection
+          const userRef = doc(db, 'users', memberId);
+          const userDoc = await getDoc(userRef);
+
+          if (!userDoc.exists()) {
+            return {
+              success: false,
+              error: 'Üye bulunamadı'
+            };
+          }
+
+          memberData = userDoc.data();
+          memberRef = userRef;
+        }
       }
 
       if (memberData.membershipStatus !== 'frozen') {
@@ -1864,15 +1927,15 @@ class MemberService {
         actualFrozenDays = Math.max(0, recordedDuration);
       }
 
+      // Calculate how many days were NOT used from the planned freeze
+      const plannedFreezeDays = recordedDuration || 0;
+      const unusedFreezeDays = Math.max(0, plannedFreezeDays - actualFrozenDays);
+
       // Get the original expiry date (before freeze was applied)
       const originalExpiryDate = parseDateValue(originalData.packageExpiryDate);
       let recalculatedExpiryISO = null;
 
       if (originalExpiryDate) {
-        // Calculate how many days were NOT used from the planned freeze
-        const plannedFreezeDays = recordedDuration || 0;
-        const unusedFreezeDays = Math.max(0, plannedFreezeDays - actualFrozenDays);
-
         // Start from original expiry + actual frozen days (what we should have)
         const recalculatedExpiry = new Date(originalExpiryDate);
         recalculatedExpiry.setDate(recalculatedExpiry.getDate() + actualFrozenDays);
@@ -1889,6 +1952,22 @@ class MemberService {
       } else {
         const fallbackExpiry = parseDateValue(memberData.packageExpiryDate || memberData.packageInfo?.expiryDate);
         recalculatedExpiryISO = fallbackExpiry ? fallbackExpiry.toISOString() : null;
+      }
+
+      // Roll back the unused portion of the freeze on the packages[] array (the
+      // source of truth). Freeze added plannedFreezeDays to each package, so we
+      // subtract the days that weren't actually used → net extension equals the
+      // days actually frozen, matching the packageExpiryDate calc above.
+      let adjustedPackages = null;
+      if (Array.isArray(memberData.packages) && unusedFreezeDays > 0) {
+        adjustedPackages = memberData.packages.map((pkg) => {
+          if (pkg.status === 'cancelled') return pkg;
+          const pkgExpiry = parseDateValue(pkg.expiryDate);
+          if (!pkgExpiry) return pkg;
+          const newExpiry = new Date(pkgExpiry);
+          newExpiry.setDate(newExpiry.getDate() - unusedFreezeDays);
+          return { ...pkg, expiryDate: newExpiry.toISOString() };
+        });
       }
 
       let updatedPackageInfo = memberData.packageInfo ? { ...memberData.packageInfo } : null;
@@ -1912,7 +1991,10 @@ class MemberService {
       // Restore original membership data
       const unfreezeData = {
         membershipStatus: originalData.membershipStatus || 'active',
-        status: 'approved',
+        // Restore the original top-level status (saved at freeze time) instead of
+        // forcing 'approved'. Falls back to 'approved' for members frozen before
+        // this field was saved.
+        status: originalData.status || 'approved',
         unfreezeDate: new Date().toISOString(),
         unfrozenBy: unfrozenBy || 'admin',
         unfreezeReason: reason || null,
@@ -1930,6 +2012,10 @@ class MemberService {
       if (recalculatedExpiryISO) {
         unfreezeData.packageExpiryDate = recalculatedExpiryISO;
         unfreezeData.packageInfo = updatedPackageInfo;
+      }
+
+      if (adjustedPackages) {
+        unfreezeData.packages = adjustedPackages;
       }
 
       await updateDoc(memberRef, unfreezeData);
@@ -2073,6 +2159,156 @@ class MemberService {
         success: false,
         error: 'Paket süre dolumu kontrolü sırasında hata oluştu'
       };
+    }
+  }
+
+  // Resync the cached packageExpiryDate/packageInfo.expiryDate from the packages[]
+  // array (the source of truth). Fixes members whose cached expiry has drifted out
+  // of sync with their actual packages — that drift makes the admin panel and the
+  // booking validation show/enforce a stale (earlier) expiry than the member sees.
+  // Pass { memberId } to fix one member, { dryRun: true } to preview without writing.
+  async syncPackageExpiryFromPackages(options = {}) {
+    const { memberId = null, dryRun = false } = options;
+    try {
+      const computeLatestExpiry = (packages) => {
+        if (!Array.isArray(packages) || packages.length === 0) return null;
+        return packages.reduce((latest, pkg) => {
+          if (pkg.status === 'cancelled' || !pkg.expiryDate) return latest;
+          const exp = parseDateValue(pkg.expiryDate);
+          if (!exp) return latest;
+          return (!latest || exp > latest) ? exp : latest;
+        }, null);
+      };
+
+      const results = { checked: 0, updated: 0, skipped: 0, changes: [], errors: [] };
+
+      const processDoc = async (collectionName, docId, data) => {
+        results.checked += 1;
+
+        // Don't touch frozen members — their expiry is actively managed by the
+        // freeze/unfreeze flow.
+        if (data.membershipStatus === 'frozen' || data.status === 'frozen') {
+          results.skipped += 1;
+          return;
+        }
+
+        const pkgLatest = computeLatestExpiry(data.packages);
+        const cacheExpiry =
+          parseDateValue(data.packageExpiryDate) || parseDateValue(data.packageInfo?.expiryDate);
+
+        // Nothing to reconcile if there is no expiry information at all.
+        if (!pkgLatest && !cacheExpiry) {
+          results.skipped += 1;
+          return;
+        }
+
+        // Target = the LATER of the two sources. We never shorten a membership:
+        // whichever side holds the more recent expiry wins and the other side is
+        // raised to match. This both (a) fixes stale caches where packages[] is
+        // ahead (e.g. Ecem) and (b) restores freeze days into packages[] where the
+        // cache is ahead by the freeze duration (the old bulk-freeze bug).
+        const target =
+          !cacheExpiry ? pkgLatest :
+          !pkgLatest ? cacheExpiry :
+          (cacheExpiry > pkgLatest ? cacheExpiry : pkgLatest);
+        const targetISO = target.toISOString();
+
+        const needCacheUpdate =
+          !cacheExpiry || (target.getTime() - cacheExpiry.getTime()) >= MS_PER_DAY;
+        const needPkgUpdate =
+          !!pkgLatest && (target.getTime() - pkgLatest.getTime()) >= MS_PER_DAY;
+
+        if (!needCacheUpdate && !needPkgUpdate) {
+          results.skipped += 1;
+          return;
+        }
+
+        // Shift every non-cancelled package forward by the same gap so the latest
+        // package reaches the target (and all packages keep their relative spacing).
+        let adjustedPackages = null;
+        if (needPkgUpdate && Array.isArray(data.packages)) {
+          const gap = target.getTime() - pkgLatest.getTime();
+          adjustedPackages = data.packages.map((pkg) => {
+            if (pkg.status === 'cancelled' || !pkg.expiryDate) return pkg;
+            const exp = parseDateValue(pkg.expiryDate);
+            if (!exp) return pkg;
+            return { ...pkg, expiryDate: new Date(exp.getTime() + gap).toISOString() };
+          });
+        }
+
+        results.changes.push({
+          id: docId,
+          name: data.displayName || data.firstName || docId,
+          cacheFrom: data.packageExpiryDate || null,
+          pkgFrom: pkgLatest ? pkgLatest.toISOString() : null,
+          to: targetISO,
+          direction: cacheExpiry && pkgLatest
+            ? (cacheExpiry > pkgLatest ? 'packages-raised' : 'cache-raised')
+            : 'filled',
+          packagesShifted: !!adjustedPackages
+        });
+
+        if (dryRun) return;
+
+        const updateData = {
+          packageExpiryDate: targetISO,
+          updatedAt: collectionName === this.membersCollection ? serverTimestamp() : new Date().toISOString()
+        };
+        if (data.packageInfo) {
+          updateData.packageInfo = { ...data.packageInfo, expiryDate: targetISO };
+        }
+        if (adjustedPackages) {
+          updateData.packages = adjustedPackages;
+        }
+
+        try {
+          await updateDoc(doc(db, collectionName, docId), updateData);
+          results.updated += 1;
+        } catch (err) {
+          results.errors.push({ id: docId, error: err.message });
+        }
+      };
+
+      if (memberId) {
+        // Single member: members collection first, then users.
+        const memberRef = doc(db, this.membersCollection, memberId);
+        const memberDoc = await getDoc(memberRef);
+        if (memberDoc.exists()) {
+          await processDoc(this.membersCollection, memberId, memberDoc.data() || {});
+        } else {
+          const userRef = doc(db, 'users', memberId);
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            return { success: false, error: 'Üye bulunamadı' };
+          }
+          await processDoc('users', memberId, userDoc.data() || {});
+        }
+      } else {
+        const processedIds = new Set();
+        const membersSnapshot = await getDocs(collection(db, this.membersCollection));
+        for (const docSnap of membersSnapshot.docs) {
+          processedIds.add(docSnap.id);
+          await processDoc(this.membersCollection, docSnap.id, docSnap.data() || {});
+        }
+        const usersSnapshot = await getDocs(
+          query(collection(db, 'users'), where('role', '==', 'customer'))
+        );
+        for (const docSnap of usersSnapshot.docs) {
+          if (processedIds.has(docSnap.id)) continue;
+          await processDoc('users', docSnap.id, docSnap.data() || {});
+        }
+      }
+
+      return {
+        success: true,
+        data: results,
+        message: dryRun
+          ? `${results.changes.length} üyenin bitiş tarihi uzatılacak (önizleme — hiçbir üye kısaltılmaz).`
+          : `${results.updated} üyenin bitiş tarihi uzlaştırıldı (kimse kısaltılmadı).`
+      };
+    } catch (error) {
+      console.error('❌ Error syncing package expiry:', error);
+      return { success: false, error: 'Bitiş tarihi senkronizasyonu başarısız oldu' };
     }
   }
 
