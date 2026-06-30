@@ -79,6 +79,7 @@ const Sidebar = ({ activeView, setActiveView, collapsed, setCollapsed, onLogout 
     { id: 'finance', icon: '💰', text: 'Finans' },
     { id: 'equipment', icon: '⚙️', text: 'Ekipmanlar' },
     { id: 'reports', icon: '📈', text: 'Raporlar' },
+    { id: 'autoNotifications', icon: '🔔', text: 'Otomatik Bildirimler' },
     { id: 'settings', icon: '⚡', text: 'Ayarlar' }
   ];
 

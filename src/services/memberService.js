@@ -125,19 +125,38 @@ class MemberService {
     }
   }
 
-  // Helper: Calculate remaining classes from packages array or packageInfo
-  // Returns calculated value from packages if available, otherwise uses packageInfo
+  // Helper: Calculate remaining classes for display.
+  // Mirrors the mobile app: shows the remaining lessons of the CURRENT active
+  // package only ("the package of the month"), not the sum across all packages.
   calculateRemainingFromPackages(userData) {
     const packages = userData.packages || [];
 
-    // If packages array has items, calculate from packages
+    // If packages array has items, return the most recent active package's remaining
     if (packages.length > 0) {
-      return packages.reduce((sum, pkg) => {
-        if (pkg.status !== 'cancelled') {
-          return sum + (pkg.remainingLessons || 0);
-        }
-        return sum;
-      }, 0);
+      const now = new Date();
+      const active = packages
+        .map((pkg) => {
+          const expiryDate = new Date(pkg.expiryDate);
+          const startDate = new Date(pkg.startDate);
+          let status = pkg.status;
+          if (pkg.status === 'cancelled') {
+            status = 'cancelled';
+          } else if (expiryDate < now) {
+            status = 'expired';
+          } else if (startDate > now) {
+            status = 'upcoming';
+          } else if ((pkg.remainingLessons || 0) <= 0) {
+            status = 'depleted';
+          } else {
+            status = 'active';
+          }
+          return { ...pkg, status };
+        })
+        .filter((pkg) => pkg.status === 'active')
+        // Most recent active package first
+        .sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+
+      return active.length > 0 ? (active[0].remainingLessons || 0) : 0;
     }
 
     // If packages is empty but packageInfo exists, use packageInfo.remainingClasses

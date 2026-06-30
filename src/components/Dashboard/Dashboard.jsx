@@ -4,6 +4,7 @@ import './Dashboard.css';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext.jsx';
 import dashboardService from '../../services/dashboardService';
+import manualNotificationService from '../../services/manualNotificationService';
 import NotificationModal from '../UI/NotificationModal';
 import { showCustomAlert } from '../../utils/customAlert';
 import '../UI/CustomAlert.css';
@@ -123,19 +124,33 @@ const Dashboard = () => {
     isProcessingNotificationRef.current = true; // Prevent any dashboard reloads
     
     try {
-      const result = await dashboardService.sendNotification(notificationData);
+      const { spec, title, message, type } = notificationData;
+      const typeMap = { info: 'general', success: 'announcement', warning: 'general', error: 'urgent' };
+      const content = {
+        title,
+        message,
+        type: typeMap[type] || 'general',
+        priority: type === 'error' ? 'high' : 'normal',
+      };
+      const result = await manualNotificationService.send(spec || { mode: 'all' }, content);
       if (result.success) {
         setShowNotificationModal(false);
-        
+
         // Use custom slide-in alert instead of browser alert
-        showCustomAlert('📬 Bildirim başarıyla gönderildi!', 'success', 4000);
-        
+        showCustomAlert(
+          spec && spec.mode !== 'all'
+            ? `📬 ${result.message || 'Bildirim gönderildi!'}`
+            : '📬 Bildirim başarıyla gönderildi!',
+          'success',
+          4000
+        );
+
         // Log to console as well
         console.log('Bildirim başarıyla gönderildi!');
-        
+
         // Explicitly prevent any automatic refresh
       } else {
-        showError(result.error || 'Bildirim gönderilirken hata oluştu');
+        showError(result.message || result.error || 'Bildirim gönderilirken hata oluştu');
       }
     } catch {
       showError('Bildirim gönderilirken hata oluştu');

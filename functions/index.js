@@ -6,6 +6,17 @@ admin.initializeApp();
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
+// Recipient keywords understood by getPushTokens. Anything else is treated as a
+// specific target user id (single-user push).
+const RECIPIENT_KEYWORDS = ['all', 'active', 'pending', 'user'];
+
+// Automatic (rule-based) notification functions.
+const autoNotifications = require('./autoNotifications');
+exports.processScheduledNotifications = autoNotifications.processScheduledNotifications;
+exports.onUserWriteCreditLow = autoNotifications.onUserWriteCreditLow;
+exports.onBookingCreated = autoNotifications.onBookingCreated;
+exports.cleanupOldNotifications = autoNotifications.cleanupOldNotifications;
+
 /**
  * Cloud Function to send push notifications via Expo
  * Triggered when a new notification document is created in Firestore
@@ -153,6 +164,17 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
 async function getPushTokens(recipientFilter = 'all') {
   try {
     const db = admin.firestore();
+
+    // Per-user target: any recipient that isn't a known keyword is a user id.
+    // Return just that user's token (used by automatic per-user notifications).
+    if (recipientFilter && !RECIPIENT_KEYWORDS.includes(recipientFilter)) {
+      const userDoc = await db.collection('users').doc(recipientFilter).get();
+      if (!userDoc.exists) return [];
+      const data = userDoc.data();
+      if (data.notificationsEnabled === false) return [];
+      return data.pushToken ? [data.pushToken] : [];
+    }
+
     let query = db.collection('users').where('notificationsEnabled', '==', true);
 
     const snapshot = await query.get();

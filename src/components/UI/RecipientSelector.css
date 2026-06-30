@@ -1,0 +1,173 @@
+.rs-root {
+  --rs-sage: #5a6b5b;
+  --rs-sage-dark: #3f4d40;
+  --rs-sage-soft: #e7ece4;
+  --rs-clay: #c08552;
+  --rs-clay-soft: #f1e4d6;
+  --rs-canvas: #f6f4ee;
+  --rs-ink: #26312a;
+  --rs-muted: #7c857c;
+  --rs-line: #e7e3d8;
+  color-scheme: light;
+  color: var(--rs-ink);
+}
+
+.rs-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--rs-sage-soft);
+  border-radius: 12px;
+  padding: 4px;
+}
+.rs-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 8px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--rs-muted);
+  font-weight: 700;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.rs-tab.active {
+  background: var(--rs-sage);
+  color: #fff;
+}
+.rs-tab-icon { font-size: 14px; }
+
+.rs-hint {
+  margin: 12px 2px 0;
+  color: var(--rs-muted);
+  font-size: 13px;
+}
+
+.rs-box {
+  margin-top: 12px;
+  background: var(--rs-canvas);
+  border: 1px solid var(--rs-line);
+  border-radius: 12px;
+  padding: 14px;
+}
+.rs-filter-row { margin-bottom: 14px; }
+.rs-filter-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--rs-sage-dark);
+  margin-bottom: 8px;
+}
+.rs-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.rs-chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--rs-line);
+  background: #fff;
+  color: var(--rs-muted);
+  font-weight: 600;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.rs-chip:hover { border-color: var(--rs-sage); color: var(--rs-sage-dark); }
+.rs-chip.active { background: var(--rs-sage); border-color: var(--rs-sage); color: #fff; }
+.rs-and-note { margin: 2px 0 0; font-size: 11.5px; font-style: italic; color: var(--rs-muted); }
+
+.rs-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--rs-line);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+.rs-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--rs-ink);
+  background: transparent;
+}
+.rs-sel-count {
+  background: var(--rs-sage);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  border-radius: 999px;
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+.rs-user-list { max-height: 260px; overflow-y: auto; margin-top: 10px; }
+.rs-user {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 6px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.rs-user:hover { background: #fff; }
+.rs-user.on { background: var(--rs-sage-soft); }
+.rs-avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--rs-clay-soft);
+  color: var(--rs-clay);
+  font-weight: 800;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rs-avatar.on { background: var(--rs-sage); color: #fff; }
+.rs-user-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rs-user-name { font-size: 14px; font-weight: 600; color: var(--rs-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-user-mail { font-size: 12px; color: var(--rs-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-badge {
+  flex-shrink: 0;
+  background: var(--rs-sage-soft);
+  color: var(--rs-sage-dark);
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.rs-check { width: 18px; color: var(--rs-sage); font-weight: 800; flex-shrink: 0; text-align: center; }
+.rs-empty { color: var(--rs-muted); font-size: 13px; text-align: center; padding: 16px 0; }
+
+.rs-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  background: var(--rs-sage-soft);
+  border-radius: 11px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rs-sage-dark);
+}
+.rs-count.empty { background: #f0efe9; color: var(--rs-muted); }
+.rs-count strong { color: var(--rs-sage); font-size: 15px; }
+.rs-count-icon { font-size: 14px; }

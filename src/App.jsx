@@ -11,6 +11,7 @@ import Reports from './components/Reports/Reports';
 import Settings from './components/Settings/Settings';
 import ReferralCodes from './components/ReferralCodes/ReferralCodes';
 import Packages from './components/Packages/Packages';
+import AutoNotifications from './components/AutoNotifications/AutoNotifications';
 import AuthContainer from './components/Auth/AuthContainer';
 import NotificationSystem from './components/UI/NotificationSystem';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -27,7 +28,8 @@ const VALID_VIEWS = [
   'reports',
   'settings',
   'referralCodes',
-  'packages'
+  'packages',
+  'autoNotifications'
 ];
 
 
@@ -96,6 +98,8 @@ function AppContent() {
         return <ReferralCodes />;
       case 'packages':
         return <Packages />;
+      case 'autoNotifications':
+        return <AutoNotifications />;
       default:
         return <Dashboard />;
     }

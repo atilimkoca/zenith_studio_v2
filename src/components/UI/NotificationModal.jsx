@@ -1,23 +1,26 @@
 // Notification Modal Component
 import React, { useState, useEffect } from 'react';
 import './NotificationModal.css';
+import RecipientSelector from './RecipientSelector';
+import manualNotificationService from '../../services/manualNotificationService';
+import { resolveRecipients } from '../../utils/recipientResolver';
 
 const NotificationModal = ({ isOpen, onClose, onSend }) => {
   const [formData, setFormData] = useState({
     title: '',
     message: '',
-    type: 'info', // info, success, warning, error
-    recipients: 'all' // all, active, pending
+    type: 'info' // info, success, warning, error
   });
+  const [spec, setSpec] = useState({ mode: 'all' });
+  const [audience, setAudience] = useState([]);
 
-  // Reset form when modal opens
+  // Reset form + load audience when modal opens
   useEffect(() => {
     if (isOpen) {
-      setFormData({
-        title: '',
-        message: '',
-        type: 'info',
-        recipients: 'all'
+      setFormData({ title: '', message: '', type: 'info' });
+      setSpec({ mode: 'all' });
+      manualNotificationService.getAudience().then((res) => {
+        if (res.success) setAudience(res.users);
       });
     }
   }, [isOpen]);
@@ -30,15 +33,21 @@ const NotificationModal = ({ isOpen, onClose, onSend }) => {
     }));
   };
 
+  const recipientCount = resolveRecipients(spec, audience).count;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.title.trim() || !formData.message.trim()) {
       return;
     }
-    
+    if (spec.mode !== 'all' && recipientCount === 0) {
+      return;
+    }
+
     try {
-      await onSend(formData);
+      // Pass the targeting spec up; Dashboard sends via manualNotificationService.
+      await onSend({ ...formData, spec });
     } catch (error) {
       console.error('Error sending notification:', error);
     }
@@ -93,35 +102,19 @@ const NotificationModal = ({ isOpen, onClose, onSend }) => {
               />
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="type">Bildirim Türü</label>
-                <select
-                  id="type"
-                  name="type"
-                  value={formData.type}
-                  onChange={handleChange}
-                >
-                  <option value="info">Bilgi</option>
-                  <option value="success">Başarı</option>
-                  <option value="warning">Uyarı</option>
-                  <option value="error">Hata</option>
-                </select>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="recipients">Alıcılar</label>
-                <select
-                  id="recipients"
-                  name="recipients"
-                  value={formData.recipients}
-                  onChange={handleChange}
-                >
-                  <option value="all">Tüm Üyeler</option>
-                  <option value="active">Aktif Üyeler</option>
-                  <option value="pending">Bekleyen Üyeler</option>
-                </select>
-              </div>
+            <div className="form-group">
+              <label htmlFor="type">Bildirim Türü</label>
+              <select id="type" name="type" value={formData.type} onChange={handleChange}>
+                <option value="info">Bilgi</option>
+                <option value="success">Başarı</option>
+                <option value="warning">Uyarı</option>
+                <option value="error">Hata</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Alıcılar</label>
+              <RecipientSelector audience={audience} spec={spec} onChange={setSpec} />
             </div>
           </div>
           
@@ -136,9 +129,13 @@ const NotificationModal = ({ isOpen, onClose, onSend }) => {
             <button
               type="submit"
               className="btn-send"
-              disabled={!formData.title.trim() || !formData.message.trim()}
+              disabled={
+                !formData.title.trim() ||
+                !formData.message.trim() ||
+                (spec.mode !== 'all' && recipientCount === 0)
+              }
             >
-              Bildirim Gönder
+              {spec.mode === 'all' ? 'Bildirim Gönder' : `${recipientCount} kişiye gönder`}
             </button>
           </div>
         </form>
