@@ -9,7 +9,7 @@
  * Exposes three builders wired from index.js:
  *   - processScheduledNotifications  (pubsub, every 15 min): lesson_reminder, membership_expiring
  *   - onUserWriteCreditLow           (users onUpdate): credit_low
- *   - onBookingCreated               (userBookings onCreate): booking_confirmation
+ *   - onBookingCreated               (userBookings onCreate): booking_confirmation + trainer_booking
  */
 
 const functions = require('firebase-functions');
@@ -20,6 +20,8 @@ const { getActivePackage, getActivePackageCredits } = require('./lib/activePacka
 const { renderTemplate } = require('./lib/template');
 const { lessonStartDate, daysUntil, toLocalDateString } = require('./lib/time');
 const { buildSentLogId } = require('./lib/sentLog');
+const { lessonLabel } = require('./lib/lessonLabel');
+const { JOIN_ACTIONS, planTrainerNotification } = require('./lib/trainerBooking');
 
 const SCAN_WINDOW_MS = 16 * 60 * 1000; // 16 min window (>= 15 min schedule, avoids gaps)
 const RETENTION_DAYS = 20; // notifications older than this are auto-deleted
@@ -36,15 +38,17 @@ async function getRule(ruleType) {
 }
 
 /** Build the variable bag shared by all templates. */
-function buildVars({ firstName, lessonType, time, date, credits }) {
+function buildVars({ firstName, lessonName, time, date, credits, studentName }) {
   return {
     isim: firstName || '',
-    ders: lessonType || '',
+    ders: lessonName || '',
     saat: time || '',
     tarih: date || '',
     kredi: credits === undefined || credits === null ? '' : credits,
+    ogrenci: studentName || '',
   };
 }
+
 
 /**
  * Create a per-user notification document once (idempotent via sentLog).
@@ -133,7 +137,7 @@ async function runLessonReminders(now) {
           if (!user) continue;
           const vars = buildVars({
             firstName: user.firstName,
-            lessonType: lesson.lessonType,
+            lessonName: lessonLabel(lesson),
             time: lesson.startTime,
             date: toLocalDateString(lesson.scheduledDate),
           });
@@ -269,47 +273,108 @@ const onUserWriteCreditLow = functions.firestore
 // Event trigger: booking_confirmation (userBookings onCreate)
 // ---------------------------------------------------------------------------
 
+/** booking_confirmation: tells the member their booking / cancellation landed. */
+async function notifyMemberOfBooking({ booking, bookingId, action }) {
+  const rule = await getRule(RULE_TYPES.BOOKING_CONFIRMATION);
+  if (!rule.enabled) return;
+  if (action !== 'booked' && action !== 'cancelled') return;
+
+  const userId = booking.userId;
+  if (!userId) return;
+
+  const lesson = booking.lessonData || {};
+  const user = await getUser(userId);
+  const vars = buildVars({
+    firstName: user ? user.firstName : '',
+    lessonName: lessonLabel(lesson),
+    time: lesson.startTime,
+    date: toLocalDateString(lesson.scheduledDate),
+  });
+
+  // Use the cancel template variant when the booking was a cancellation.
+  const effectiveRule =
+    action === 'cancelled' && rule.cancelTemplate
+      ? { ...rule, template: rule.cancelTemplate }
+      : rule;
+
+  await createUserNotification({
+    rule: effectiveRule,
+    ruleType: RULE_TYPES.BOOKING_CONFIRMATION,
+    userId,
+    refId: bookingId,
+    offset: action,
+    vars,
+    lang: user ? user.lang : 'tr',
+  });
+}
+
+/**
+ * trainer_booking: tells the lesson's trainer that a member joined their class.
+ * The trainer is lessons/{id}.trainerId; the booking carries a snapshot of the
+ * lesson, and we fall back to reading the lesson document for older records.
+ */
+async function notifyTrainerOfBooking({ booking, bookingId, action }) {
+  const rule = await getRule(RULE_TYPES.TRAINER_BOOKING);
+  if (!rule.enabled) return;
+  if (!JOIN_ACTIONS.includes(action)) return;
+
+  const memberId = booking.userId;
+  if (!memberId) return;
+
+  let lesson = booking.lessonData || {};
+  if (!lesson.trainerId && booking.lessonId) {
+    const snap = await db().collection('lessons').doc(booking.lessonId).get();
+    if (snap.exists) lesson = { ...lesson, ...snap.data() };
+  }
+
+  const trainerId = lesson.trainerId;
+  if (!trainerId || trainerId === memberId) return;
+
+  const [trainer, member] = await Promise.all([getUser(trainerId), getUser(memberId)]);
+
+  // All the "should this be sent, and what does it say" rules live in
+  // lib/trainerBooking.js so they can be unit-tested without Firestore.
+  const plan = planTrainerNotification({
+    enabled: rule.enabled,
+    action,
+    booking,
+    lesson,
+    trainer,
+    member,
+  });
+  if (!plan) return;
+
+  await createUserNotification({
+    rule,
+    ruleType: RULE_TYPES.TRAINER_BOOKING,
+    userId: plan.userId,
+    refId: bookingId,
+    offset: plan.offset,
+    vars: plan.vars,
+    lang: plan.lang,
+  });
+}
+
 const onBookingCreated = functions.firestore
   .document('userBookings/{bookingId}')
   .onCreate(async (snap, context) => {
-    const rule = await getRule(RULE_TYPES.BOOKING_CONFIRMATION);
-    if (!rule.enabled) return null;
-
     const booking = snap.data();
     const action = booking.action || booking.status;
-    if (action !== 'booked' && action !== 'cancelled') return null;
+    const bookingId = context.params.bookingId;
 
-    const userId = booking.userId;
-    if (!userId) return null;
-
-    const lesson = booking.lessonData || {};
-    const user = await getUser(userId);
-    const vars = buildVars({
-      firstName: user ? user.firstName : '',
-      lessonType: lesson.lessonType,
-      time: lesson.startTime,
-      date: toLocalDateString(lesson.scheduledDate),
+    // The two notifications are independent: one failing must not silence the other.
+    const results = await Promise.allSettled([
+      notifyMemberOfBooking({ booking, bookingId, action }),
+      notifyTrainerOfBooking({ booking, bookingId, action }),
+    ]);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(i === 0 ? 'booking_confirmation error' : 'trainer_booking error', {
+          bookingId,
+          err: r.reason && r.reason.message,
+        });
+      }
     });
-
-    // Use the cancel template variant when the booking was a cancellation.
-    const effectiveRule =
-      action === 'cancelled' && rule.cancelTemplate
-        ? { ...rule, template: rule.cancelTemplate }
-        : rule;
-
-    try {
-      await createUserNotification({
-        rule: effectiveRule,
-        ruleType: RULE_TYPES.BOOKING_CONFIRMATION,
-        userId,
-        refId: context.params.bookingId,
-        offset: action,
-        vars,
-        lang: user ? user.lang : 'tr',
-      });
-    } catch (err) {
-      console.error('booking_confirmation error', { userId, err: err.message });
-    }
     return null;
   });
 

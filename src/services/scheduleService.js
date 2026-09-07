@@ -1,19 +1,42 @@
 // Schedule Service for Lesson Management
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  doc, 
-  updateDoc, 
-  deleteDoc,
-  getDoc,
-  query,
-  where,
-  serverTimestamp,
-  Timestamp
-} from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, getDoc, query, where, serverTimestamp, Timestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import memberService from './memberService';
+import {
+  joinLessonAtomically,
+  leaveLessonAtomically,
+  cancelLessonWithRefunds,
+  deleteLessonWithRefunds,
+  BookingError,
+  isBookingError
+} from './bookingTransactions.js';
+import { buildWeeklySchedule, emptyWeek } from './weeklySchedule.js';
+import { lessonDateKey } from './lessonDateKey.js';
+
+// Error texts for the participant API used by the lesson detail modal.
+// Codes not listed here carry their own message (thrown with the error).
+const PARTICIPANT_ERRORS = {
+  lessonNotFound: 'Ders bulunamadı',
+  userNotFound: 'Kullanıcı bulunamadı',
+  alreadyRegistered: 'Katılımcı zaten bu derste kayıtlı',
+  lessonFull: 'Ders dolu - daha fazla katılımcı eklenemez',
+  notRegistered: 'Katılımcı bu derste kayıtlı değil',
+  insufficientCredits: 'Pakette kalan ders yok',
+  noPackageForDate: 'Bu tarih için geçerli bir paket bulunamadı'
+};
+
+// Error texts for the student API used by the "Öğrenci Ekle" modal and the
+// self-service web booking page.
+const STUDENT_ERRORS = {
+  lessonNotFound: 'Ders bulunamadı.',
+  userNotFound: 'Kullanıcı bulunamadı.',
+  alreadyRegistered: 'Öğrenci zaten bu derse kayıtlı.',
+  lessonFull: 'Ders dolu. Maksimum katılımcı sayısına ulaşıldı.',
+  notRegistered: 'Öğrenci bu derse kayıtlı değil.',
+  insufficientCredits: 'Öğrencinin kalan dersi yok. Lütfen paket satın almasını sağlayın.',
+  noPackageForDate: 'Bu tarih için geçerli bir paketiniz bulunmuyor.'
+};
+
+const bookingErrorText = (table, error, fallback) => table[error.code] || error.message || fallback;
 
 class ScheduleService {
   normalizeDate(value) {
@@ -55,6 +78,8 @@ class ScheduleService {
     try {
       const lesson = {
         ...lessonData,
+        // Day key lets clients query one day instead of the whole collection.
+        scheduledDateKey: lessonDateKey(lessonData.scheduledDate, (value) => this.normalizeDate(value)),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         status: 'active'
@@ -232,10 +257,12 @@ class ScheduleService {
     try {
       const lessonRef = doc(db, 'lessons', lessonId);
       
-      await updateDoc(lessonRef, {
-        ...updates,
-        updatedAt: serverTimestamp()
-      });
+      const payload = { ...updates, updatedAt: serverTimestamp() };
+      if (Object.prototype.hasOwnProperty.call(updates, 'scheduledDate')) {
+        payload.scheduledDateKey = lessonDateKey(updates.scheduledDate, (value) => this.normalizeDate(value));
+      }
+
+      await updateDoc(lessonRef, payload);
       
       return {
         success: true
@@ -253,38 +280,23 @@ class ScheduleService {
   // Delete lesson
   async deleteLesson(lessonId) {
     try {
-      // First get the lesson to refund participants
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (lessonDoc.exists()) {
-        const lessonData = lessonDoc.data();
-        const participants = lessonData.participants || [];
-        const lessonScheduledDate = lessonData.scheduledDate || lessonData.date;
-        
-        // Refund credits to all participants before deleting
-        if (participants.length > 0 && lessonScheduledDate) {
-          for (const participantId of participants) {
-            try {
-              await memberService.refundLessonToPackage(
-                participantId,
-                lessonScheduledDate,
-                `Ders silindi: ${lessonData.title || 'İsimsiz Ders'}`
-              );
-              console.log(`✅ Credit refunded for participant: ${participantId}`);
-            } catch (refundError) {
-              console.error(`❌ Failed to refund credit for participant ${participantId}:`, refundError);
-            }
-          }
-        }
-      }
-      
-      await deleteDoc(lessonRef);
-      
+      // Refund every participant and delete the lesson in ONE transaction.
+      const result = await deleteLessonWithRefunds({
+        lessonId,
+        lessonInfo: (lessonData) => `Ders silindi: ${lessonData.title || 'İsimsiz Ders'}`,
+        userExtra: { updatedAt: serverTimestamp() }
+      });
+      result.refunded.forEach(({ userId }) => console.log(`✅ Credit refunded for participant: ${userId}`));
+
       return {
-        success: true
+        success: true,
+        refundedCount: result.refunded.length
       };
     } catch (error) {
+      if (isBookingError(error) && error.code === 'lessonNotFound') {
+        // Nothing left to delete; the previous deleteDoc on a missing document also succeeded.
+        return { success: true, refundedCount: 0 };
+      }
       console.error('❌ Error deleting lesson:', error);
       return {
         success: false,
@@ -296,47 +308,31 @@ class ScheduleService {
   // Cancel lesson (soft delete)
   async cancelLesson(lessonId, adminId) {
     try {
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (!lessonDoc.exists()) {
+      // Refund every participant and mark the lesson cancelled in ONE transaction.
+      const result = await cancelLessonWithRefunds({
+        lessonId,
+        lessonInfo: (lessonData) => `Ders iptal edildi: ${lessonData.title || 'İsimsiz Ders'}`,
+        lessonUpdate: {
+          status: 'cancelled',
+          cancelledAt: new Date().toISOString(),
+          cancelledBy: adminId,
+          updatedAt: serverTimestamp()
+        },
+        userExtra: { updatedAt: serverTimestamp() }
+      });
+      result.refunded.forEach(({ userId }) => console.log(`✅ Credit refunded for participant: ${userId}`));
+
+      return {
+        success: true,
+        refundedCount: result.refunded.length
+      };
+    } catch (error) {
+      if (isBookingError(error) && error.code === 'lessonNotFound') {
         return {
           success: false,
           error: 'Ders bulunamadı'
         };
       }
-      
-      const lessonData = lessonDoc.data();
-      const participants = lessonData.participants || [];
-      const lessonScheduledDate = lessonData.scheduledDate || lessonData.date;
-      
-      // Refund credits to all participants
-      if (participants.length > 0 && lessonScheduledDate) {
-        for (const participantId of participants) {
-          try {
-            await memberService.refundLessonToPackage(
-              participantId,
-              lessonScheduledDate,
-              `Ders iptal edildi: ${lessonData.title || 'İsimsiz Ders'}`
-            );
-            console.log(`✅ Credit refunded for participant: ${participantId}`);
-          } catch (refundError) {
-            console.error(`❌ Failed to refund credit for participant ${participantId}:`, refundError);
-          }
-        }
-      }
-      
-      await updateDoc(lessonRef, {
-        status: 'cancelled',
-        cancelledAt: new Date().toISOString(),
-        cancelledBy: adminId,
-        updatedAt: serverTimestamp()
-      });
-      
-      return {
-        success: true
-      };
-    } catch (error) {
       console.error('❌ Error cancelling lesson:', error);
       return {
         success: false,
@@ -637,96 +633,54 @@ class ScheduleService {
   async getWeeklyScheduleByDateRange(startDate, endDate) {
     try {
       const result = await this.getAllLessons();
-      
+
       if (!result.success) {
         return {
           success: true,
-          schedule: {
-            monday: [],
-            tuesday: [],
-            wednesday: [],
-            thursday: [],
-            friday: [],
-            saturday: [],
-            sunday: []
-          }
+          schedule: emptyWeek()
         };
       }
 
-      const weeklySchedule = {
-        monday: [],
-        tuesday: [],
-        wednesday: [],
-        thursday: [],
-        friday: [],
-        saturday: [],
-        sunday: []
-      };
-
-      // Filter lessons by date range
-      if (result.lessons && Array.isArray(result.lessons)) {
-        // Normalize dates to local midnight for accurate comparison
-        const startDateLocal = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-        const endDateLocal = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-        const startTimestamp = startDateLocal.getTime();
-        const endTimestamp = endDateLocal.getTime();
-        
-        result.lessons.forEach(lesson => {
-          // Check if lesson falls within the specified week
-          let includeLesson = false;
-          
-          if (lesson.scheduledDate) {
-            // For recurring lessons, check if the scheduled date is in this week
-            // Use normalizeDate to handle date-only strings correctly (as local time)
-            const lessonDate = this.normalizeDate(lesson.scheduledDate);
-            
-            if (lessonDate) {
-              // Normalize lesson date to local midnight
-              const lessonDateLocal = new Date(lessonDate.getFullYear(), lessonDate.getMonth(), lessonDate.getDate());
-              const lessonTimestamp = lessonDateLocal.getTime();
-              
-              // Compare timestamps for accurate date comparison
-              includeLesson = lessonTimestamp >= startTimestamp && lessonTimestamp <= endTimestamp;
-            }
-          } else {
-            // For legacy lessons without specific dates, include them in all weeks
-            includeLesson = true;
-          }
-          
-          if (includeLesson && lesson.dayOfWeek && weeklySchedule[lesson.dayOfWeek]) {
-            weeklySchedule[lesson.dayOfWeek].push(lesson);
-          }
-        });
-      }
-
-      // Sort each day by start time
-      Object.keys(weeklySchedule).forEach(day => {
-        weeklySchedule[day].sort((a, b) => {
-          if (!a.startTime || !b.startTime) return 0;
-          return a.startTime.localeCompare(b.startTime);
-        });
-      });
-      
       return {
         success: true,
-        schedule: weeklySchedule
+        schedule: buildWeeklySchedule(result.lessons, startDate, endDate, (value) => this.normalizeDate(value))
       };
     } catch (error) {
       console.error('❌ Error getting weekly schedule by date range:', error);
       return {
         success: false,
         error: 'Haftalık program alınırken hata oluştu: ' + error.message,
-        schedule: {
-          monday: [],
-          tuesday: [],
-          wednesday: [],
-          thursday: [],
-          friday: [],
-          saturday: [],
-          sunday: []
-        }
+        schedule: emptyWeek()
       };
     }
+  }
+
+  // Live updates for the lessons collection. `onLessons` receives the full
+  // mapped list on every change. Errors are logged and passed to `onError`;
+  // they never touch auth or application state.
+  subscribeToLessons(onLessons, onError) {
+    return onSnapshot(
+      collection(db, 'lessons'),
+      (snapshot) => {
+        const lessons = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        onLessons(lessons);
+      },
+      (error) => {
+        console.warn('⚠️ Lesson live updates unavailable:', error);
+        if (onError) onError(error);
+      }
+    );
+  }
+
+  // True when the lesson's start (scheduledDate + startTime) is already behind us.
+  isLessonInPast(lessonData) {
+    if (!lessonData || !lessonData.scheduledDate || !lessonData.startTime) return false;
+    const lessonDate = this.normalizeDate(lessonData.scheduledDate);
+    if (!lessonDate) return false;
+    const [hours, minutes] = lessonData.startTime.split(':').map(Number);
+    const start = new Date(lessonDate);
+    start.setHours(hours || 0, minutes || 0, 0, 0);
+    return start < new Date();
   }
 
   // Get weekly schedule (organized by days)
@@ -950,74 +904,29 @@ class ScheduleService {
   // Add a participant to a lesson and reduce their remaining classes
   async addParticipantToLesson(lessonId, participantId) {
     try {
-      
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (!lessonDoc.exists()) {
-        return {
-          success: false,
-          error: 'Ders bulunamadı'
-        };
-      }
-
-      const lessonData = lessonDoc.data();
-      let participants = lessonData.participants || [];
-      const maxParticipants = lessonData.maxParticipants || 0;
-
-      // Check if participant is already in the lesson
-      if (participants.includes(participantId)) {
-        return {
-          success: false,
-          error: 'Katılımcı zaten bu derste kayıtlı'
-        };
-      }
-
-      // Check if lesson is full
-      if (participants.length >= maxParticipants) {
-        return {
-          success: false,
-          error: 'Ders dolu - daha fazla katılımcı eklenemez'
-        };
-      }
-
-      // Get lesson date for package deduction
-      let lessonDateForDeduction = lessonData.scheduledDate;
-      if (typeof lessonDateForDeduction === 'object' && lessonDateForDeduction.toDate) {
-        lessonDateForDeduction = lessonDateForDeduction.toDate().toISOString();
-      }
-
-      // Deduct lesson from the appropriate package using multi-package system
-      const memberService = (await import('./memberService')).default;
-      const deductResult = await memberService.deductLessonFromPackage(
-        participantId,
-        lessonDateForDeduction,
-        `${lessonData.title} - ${lessonData.scheduledDate}`
-      );
-
-      if (!deductResult.success) {
-        return {
-          success: false,
-          error: deductResult.error || 'Ders kredisi düşülürken bir hata oluştu'
-        };
-      }
-
-      // Add participant to lesson
-      participants.push(participantId);
-
-      await updateDoc(lessonRef, {
-        participants: participants,
-        currentParticipants: participants.length,
-        updatedAt: serverTimestamp()
+      // Seat + credit change together in one transaction (see bookingCore.js).
+      const result = await joinLessonAtomically({
+        lessonId,
+        userId: participantId,
+        lessonInfo: (lessonData) => `${lessonData.title} - ${lessonData.scheduledDate}`,
+        lessonExtra: { updatedAt: serverTimestamp() },
+        userExtra: { updatedAt: serverTimestamp() }
       });
+      const { plan } = result;
 
       return {
         success: true,
-        message: `Katılımcı derse eklendi (${deductResult.packageName || 'Paket'} - Kalan: ${deductResult.totalRemaining})`,
-        remainingClasses: deductResult.totalRemaining,
-        deductedFromPackage: deductResult.packageName
+        message: `Katılımcı derse eklendi (${plan.packageName || 'Paket'} - Kalan: ${plan.totalRemaining})`,
+        remainingClasses: plan.totalRemaining,
+        deductedFromPackage: plan.packageName
       };
     } catch (error) {
+      if (isBookingError(error)) {
+        return {
+          success: false,
+          error: bookingErrorText(PARTICIPANT_ERRORS, error, 'Katılımcı eklenirken hata oluştu')
+        };
+      }
       console.error('❌ Error adding participant to lesson:', error);
       return {
         success: false,
@@ -1133,70 +1042,32 @@ class ScheduleService {
   // Remove a participant from a lesson
   async removeParticipantFromLesson(lessonId, participantId) {
     try {
-      
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (!lessonDoc.exists()) {
-        return {
-          success: false,
-          error: 'Ders bulunamadı'
-        };
-      }
-
-      const lessonData = lessonDoc.data();
-      let participants = lessonData.participants || [];
-
-      // Check if participant is in the lesson
-      if (!participants.includes(participantId)) {
-        return {
-          success: false,
-          error: 'Katılımcı bu derste kayıtlı değil'
-        };
-      }
-
-      // Get lesson date for package refund
-      let lessonDateForRefund = lessonData.scheduledDate;
-      if (typeof lessonDateForRefund === 'object' && lessonDateForRefund.toDate) {
-        lessonDateForRefund = lessonDateForRefund.toDate().toISOString();
-      }
-
-      console.log('🔄 Refunding credit for participant:', participantId, 'lessonDate:', lessonDateForRefund);
-
-      // Refund credit to the appropriate package using multi-package system
-      const memberService = (await import('./memberService')).default;
-      const refundResult = await memberService.refundLessonToPackage(
-        participantId,
-        lessonDateForRefund,
-        `Katılımcı çıkarıldı: ${lessonData.title} - ${lessonData.scheduledDate}`
-      );
-
-      console.log('📦 Refund result:', refundResult);
-
-      if (!refundResult.success) {
-        console.warn('⚠️ Credit refund failed:', refundResult.error);
-        // Continue with removal even if refund fails
-      } else {
-        console.log('✅ Credit refunded successfully. Total remaining:', refundResult.totalRemaining);
-      }
-
-      // Remove participant from array
-      participants = participants.filter(id => id !== participantId);
-
-      await updateDoc(lessonRef, {
-        participants: participants,
-        currentParticipants: participants.length,
-        updatedAt: serverTimestamp()
+      // Seat removal + credit refund in one transaction. A missing member
+      // document only skips the refund; the seat is still released.
+      const result = await leaveLessonAtomically({
+        lessonId,
+        userId: participantId,
+        lessonInfo: (lessonData) => `Katılımcı çıkarıldı: ${lessonData.title} - ${lessonData.scheduledDate}`,
+        allowMissingUser: true,
+        lessonExtra: { updatedAt: serverTimestamp() },
+        userExtra: { updatedAt: serverTimestamp() }
       });
+      const { plan } = result;
 
       return {
         success: true,
-        message: refundResult.success 
-          ? `Katılımcı dersten çıkarıldı (${refundResult.packageName || 'Paket'} - Kalan: ${refundResult.totalRemaining})`
+        message: plan
+          ? `Katılımcı dersten çıkarıldı (${plan.packageName || 'Paket'} - Kalan: ${plan.totalRemaining})`
           : 'Katılımcı dersten çıkarıldı (Kredi iadesi yapılamadı)',
-        remainingClasses: refundResult.totalRemaining
+        remainingClasses: plan ? plan.totalRemaining : undefined
       };
     } catch (error) {
+      if (isBookingError(error)) {
+        return {
+          success: false,
+          error: bookingErrorText(PARTICIPANT_ERRORS, error, 'Katılımcı çıkarılırken hata oluştu')
+        };
+      }
       console.error('❌ Error removing participant from lesson:', error);
       return {
         success: false,
@@ -1246,158 +1117,51 @@ class ScheduleService {
   }
 
   // Manually add student to lesson (admin/instructor only)
-  async addStudentToLesson(lessonId, userId) {
+  async addStudentToLesson(lessonId, userId, adminId = null) {
     try {
-      // First, check user's remaining credits
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        return {
-          success: false,
-          error: 'Kullanıcı bulunamadı.'
-        };
-      }
-      
-      const userData = userDoc.data();
-      const remainingCredits = userData.remainingClasses || userData.lessonCredits || 0;
-
-      if (remainingCredits <= 0) {
-        return {
-          success: false,
-          error: 'Öğrencinin kalan dersi yok. Lütfen paket satın almasını sağlayın.'
-        };
-      }
-
-      // Check if user is deleted
-      if (userData.status === 'deleted' || userData.status === 'permanently_deleted') {
-        return {
-          success: false,
-          error: 'Bu öğrenci silinmiş. Silinen üyeler derse eklenemez.'
-        };
-      }
-
-      // Check if user is cancelled
-      if (userData.status === 'cancelled' || userData.membershipStatus === 'cancelled') {
-        return {
-          success: false,
-          error: 'Bu öğrencinin üyeliği iptal edilmiş. İptal edilen üyeler derse eklenemez.'
-        };
-      }
-
-      // Check if user is frozen
-      if (userData.membershipStatus === 'frozen' || userData.status === 'frozen') {
-        return {
-          success: false,
-          error: 'Bu öğrencinin üyeliği dondurulmuş. Dondurulmuş üyeler derse eklenemez.'
-        };
-      }
-
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (!lessonDoc.exists()) {
-        return {
-          success: false,
-          error: 'Ders bulunamadı.'
-        };
-      }
-      
-      const lessonData = lessonDoc.data();
-      const currentParticipants = lessonData.participants || [];
-      const maxParticipants = lessonData.maxParticipants || lessonData.maxStudents || 0;
-      
-      // Check if lesson is in the past
-      const now = new Date();
-      let lessonDateTime;
-      
-      if (lessonData.scheduledDate && lessonData.startTime) {
-        // Create a date object for the lesson
-        let lessonDate;
-        if (typeof lessonData.scheduledDate === 'string') {
-          lessonDate = new Date(lessonData.scheduledDate);
-        } else if (lessonData.scheduledDate.toDate) {
-          // Firestore Timestamp
-          lessonDate = lessonData.scheduledDate.toDate();
-        } else {
-          lessonDate = new Date(lessonData.scheduledDate);
-        }
-        
-        // Parse the time (format: "HH:MM")
-        const [hours, minutes] = lessonData.startTime.split(':').map(Number);
-        lessonDate.setHours(hours, minutes, 0, 0);
-        lessonDateTime = lessonDate;
-        
-        // Check if lesson is in the past
-        if (lessonDateTime < now) {
-          return {
-            success: false,
-            error: 'Geçmiş bir derse öğrenci eklenemez. Bu ders zaten gerçekleşti.'
-          };
-        }
-
-        // Check if user has a package that covers this lesson date using multi-package system
-        const canBookResult = await memberService.canBookLessonOnDate(userId, lessonDate);
-        if (!canBookResult.canBook) {
-          return {
-            success: false,
-            error: canBookResult.message || 'Bu ders tarihi için geçerli bir paketiniz bulunmuyor.'
-          };
-        }
-      }
-
-      // Check if lesson is full
-      if (currentParticipants.length >= maxParticipants) {
-        return {
-          success: false,
-          error: 'Ders dolu. Maksimum katılımcı sayısına ulaşıldı.'
-        };
-      }
-
-      // Check if user is already registered
-      if (currentParticipants.includes(userId)) {
-        return {
-          success: false,
-          error: 'Öğrenci zaten bu derse kayıtlı.'
-        };
-      }
-
-      // Get the lesson date for deduction
-      let lessonDateForDeduction = lessonData.scheduledDate;
-      if (typeof lessonDateForDeduction === 'object' && lessonDateForDeduction.toDate) {
-        lessonDateForDeduction = lessonDateForDeduction.toDate().toISOString();
-      }
-
-      // Deduct lesson from the appropriate package using multi-package system
-      const deductResult = await memberService.deductLessonFromPackage(
+      // Every check runs on the data read inside the transaction, and the seat
+      // and the credit are written together, so a booking made from the mobile
+      // app at the same moment can no longer be overwritten.
+      const result = await joinLessonAtomically({
+        lessonId,
         userId,
-        lessonDateForDeduction,
-        `${lessonData.title} - ${lessonData.scheduledDate}`
-      );
-
-      if (!deductResult.success) {
-        return {
-          success: false,
-          error: deductResult.error || 'Ders kredisi düşülürken bir hata oluştu.'
-        };
-      }
-
-      // Add user to participants
-      const updatedParticipants = [...currentParticipants, userId];
-
-      await updateDoc(lessonRef, {
-        participants: updatedParticipants,
-        currentParticipants: updatedParticipants.length,
-        updatedAt: serverTimestamp()
+        lessonInfo: (lessonData) => `${lessonData.title} - ${lessonData.scheduledDate}`,
+        validateUser: (userData) => {
+          if (userData.status === 'deleted' || userData.status === 'permanently_deleted') {
+            throw new BookingError('accountDeleted', 'Bu öğrenci silinmiş. Silinen üyeler derse eklenemez.');
+          }
+          if (userData.status === 'cancelled' || userData.membershipStatus === 'cancelled') {
+            throw new BookingError('membershipCancelled', 'Bu öğrencinin üyeliği iptal edilmiş. İptal edilen üyeler derse eklenemez.');
+          }
+          if (userData.membershipStatus === 'frozen' || userData.status === 'frozen') {
+            throw new BookingError('membershipFrozen', 'Bu öğrencinin üyeliği dondurulmuş. Dondurulmuş üyeler derse eklenemez.');
+          }
+        },
+        validateLesson: (lessonData) => {
+          if (this.isLessonInPast(lessonData)) {
+            throw new BookingError('lessonInPast', 'Geçmiş bir derse öğrenci eklenemez. Bu ders zaten gerçekleşti.');
+          }
+        },
+        lessonExtra: adminId
+          ? { updatedAt: serverTimestamp(), updatedBy: adminId }
+          : { updatedAt: serverTimestamp() },
+        userExtra: { updatedAt: serverTimestamp() }
       });
+      const { plan } = result;
 
       return {
         success: true,
-        message: `Öğrenci derse başarıyla eklendi. (${deductResult.packageName} paketinden düşüldü)`,
-        remainingCredits: deductResult.totalRemaining,
-        deductedFromPackage: deductResult.packageName
+        message: `Öğrenci derse başarıyla eklendi. (${plan.packageName || 'Paket'} paketinden düşüldü)`,
+        remainingCredits: plan.totalRemaining,
+        deductedFromPackage: plan.packageName
       };
     } catch (error) {
+      if (isBookingError(error)) {
+        return {
+          success: false,
+          error: bookingErrorText(STUDENT_ERRORS, error, 'Öğrenci eklenirken hata oluştu.')
+        };
+      }
       console.error('❌ Error adding student to lesson:', error);
       return {
         success: false,
@@ -1407,84 +1171,39 @@ class ScheduleService {
   }
 
   // Remove student from lesson (admin/instructor only)
-  async removeStudentFromLesson(lessonId, userId) {
+  async removeStudentFromLesson(lessonId, userId, adminId = null) {
     try {
-      const lessonRef = doc(db, 'lessons', lessonId);
-      const lessonDoc = await getDoc(lessonRef);
-      
-      if (!lessonDoc.exists()) {
-        return {
-          success: false,
-          error: 'Ders bulunamadı.'
-        };
-      }
-      
-      const lessonData = lessonDoc.data();
-      const currentParticipants = lessonData.participants || [];
-      
-      // Check if lesson is in the past
-      const now = new Date();
-      if (lessonData.scheduledDate && lessonData.startTime) {
-        let lessonDate;
-        if (typeof lessonData.scheduledDate === 'string') {
-          lessonDate = new Date(lessonData.scheduledDate);
-        } else if (lessonData.scheduledDate.toDate) {
-          lessonDate = lessonData.scheduledDate.toDate();
-        } else {
-          lessonDate = new Date(lessonData.scheduledDate);
-        }
-        
-        const [hours, minutes] = lessonData.startTime.split(':').map(Number);
-        lessonDate.setHours(hours, minutes, 0, 0);
-        
-        if (lessonDate < now) {
-          return {
-            success: false,
-            error: 'Geçmiş bir dersten öğrenci çıkarılamaz. Bu ders zaten gerçekleşti.'
-          };
-        }
-      }
-      
-      // Check if user is registered
-      if (!currentParticipants.includes(userId)) {
-        return {
-          success: false,
-          error: 'Öğrenci bu derse kayıtlı değil.'
-        };
-      }
-      
-      // Refund credit to the appropriate package
-      let lessonDateForRefund = lessonData.scheduledDate;
-      if (typeof lessonDateForRefund === 'object' && lessonDateForRefund.toDate) {
-        lessonDateForRefund = lessonDateForRefund.toDate().toISOString();
-      }
-
-      const refundResult = await memberService.refundLessonToPackage(
+      const result = await leaveLessonAtomically({
+        lessonId,
         userId,
-        lessonDateForRefund,
-        `Ders iptali: ${lessonData.title} - ${lessonData.scheduledDate}`
-      );
-
-      if (!refundResult.success) {
-        console.warn('⚠️ Could not refund credit to package:', refundResult.error);
-      } else {
-        console.log('✅ Lesson credit refunded to package:', refundResult.packageName);
-      }
-
-      // Remove user from participants
-      const updatedParticipants = currentParticipants.filter(id => id !== userId);
-      
-      await updateDoc(lessonRef, {
-        participants: updatedParticipants,
-        currentParticipants: updatedParticipants.length,
-        updatedAt: serverTimestamp()
+        lessonInfo: (lessonData) => `Ders iptali: ${lessonData.title} - ${lessonData.scheduledDate}`,
+        allowMissingUser: true,
+        validateLesson: (lessonData) => {
+          if (this.isLessonInPast(lessonData)) {
+            throw new BookingError('lessonInPast', 'Geçmiş bir dersten öğrenci çıkarılamaz. Bu ders zaten gerçekleşti.');
+          }
+        },
+        lessonExtra: adminId
+          ? { updatedAt: serverTimestamp(), updatedBy: adminId }
+          : { updatedAt: serverTimestamp() },
+        userExtra: { updatedAt: serverTimestamp() }
       });
-      
+      const { plan } = result;
+
       return {
         success: true,
-        message: 'Öğrenci dersten başarıyla çıkarıldı. Ders kredisi iade edildi.'
+        message: plan
+          ? 'Öğrenci dersten başarıyla çıkarıldı. Ders kredisi iade edildi.'
+          : 'Öğrenci dersten çıkarıldı. (Kredi iadesi yapılamadı)',
+        remainingCredits: plan ? plan.totalRemaining : undefined
       };
     } catch (error) {
+      if (isBookingError(error)) {
+        return {
+          success: false,
+          error: bookingErrorText(STUDENT_ERRORS, error, 'Öğrenci çıkarılırken hata oluştu.')
+        };
+      }
       console.error('❌ Error removing student from lesson:', error);
       return {
         success: false,

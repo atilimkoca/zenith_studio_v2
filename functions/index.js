@@ -17,6 +17,12 @@ exports.onUserWriteCreditLow = autoNotifications.onUserWriteCreditLow;
 exports.onBookingCreated = autoNotifications.onBookingCreated;
 exports.cleanupOldNotifications = autoNotifications.cleanupOldNotifications;
 
+// Lesson maintenance: hourly auto-complete of ended lessons + scheduledDateKey
+// stamping, and the one-off admin backfill callable.
+const lessonMaintenance = require('./lib/lessonMaintenance');
+exports.autoCompleteLessons = lessonMaintenance.autoCompleteLessons;
+exports.backfillLessonDateKeys = lessonMaintenance.backfillLessonDateKeys;
+
 /**
  * Cloud Function to send push notifications via Expo
  * Triggered when a new notification document is created in Firestore

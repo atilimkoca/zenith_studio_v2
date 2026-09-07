@@ -262,7 +262,7 @@ const Reports = () => {
   const getTableHeaders = (reportType) => {
     const headers = {
       memberDetails: ['Üye', 'Telefon', 'E-posta', 'Paket Adı', 'Kalan Ders', 'Paket Bitiş', 'Onay Tarihi'],
-      deletedMembers: ['Üye', 'Telefon', 'E-posta', 'Silinme Tarihi', 'Silme Sebebi', 'Üyelik Türü', 'Son Ziyaret'],
+      deletedMembers: ['Üye', 'Telefon', 'E-posta', 'Silinme Tarihi', 'Silen', 'Silme Sebebi', 'Üyelik Türü', 'Son Ziyaret'],
       expiredMembers: ['Üye', 'Telefon', 'E-posta', 'Bitiş Tarihi', 'Geçen Süre', 'Sebep'],
       frozenMembers: ['Üye', 'Dondurma Başlangıç', 'Dondurma Bitiş', 'Sebep'],
       cancelledMembers: ['Üye', 'İptal Tarihi', 'İptal Sebebi', 'İade Tutarı'],
@@ -290,6 +290,7 @@ const Reports = () => {
         data.phone || '',
         data.email || '',
         data.deletedAt || '',
+        data.deletedByLabel || 'Bilinmiyor',
         data.deletionReason || 'Belirtilmemiş',
         data.membershipType || '',
         data.lastVisit || 'Hiç'

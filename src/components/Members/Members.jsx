@@ -208,7 +208,7 @@ const Members = () => {
       setIsProcessing(true);
       
       // Use soft delete - mark as deleted but keep in Firebase Auth
-      const result = await memberService.deleteMember(memberId);
+      const result = await memberService.deleteMember(memberId, currentUser?.uid);
 
       if (result.success) {
         await loadMembers();

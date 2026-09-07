@@ -13,6 +13,7 @@ export const RULE_TYPES = {
   MEMBERSHIP_EXPIRING: 'membership_expiring',
   CREDIT_LOW: 'credit_low',
   BOOKING_CONFIRMATION: 'booking_confirmation',
+  TRAINER_BOOKING: 'trainer_booking',
 };
 
 export const TEMPLATE_VARIABLES = [
@@ -21,6 +22,7 @@ export const TEMPLATE_VARIABLES = [
   { key: 'saat', label: 'Saat' },
   { key: 'tarih', label: 'Tarih' },
   { key: 'kredi', label: 'Kalan kredi' },
+  { key: 'ogrenci', label: 'Öğrenci adı (eğitmen bildirimi)' },
 ];
 
 const VALID_VARS = TEMPLATE_VARIABLES.map((v) => v.key);
@@ -61,6 +63,12 @@ export const RULE_META = {
     icon: '✅',
     category: 'event',
     hasCancelTemplate: true,
+  },
+  [RULE_TYPES.TRAINER_BOOKING]: {
+    label: 'Eğitmene Rezervasyon Bildirimi',
+    description: 'Dersine bir öğrenci kaydolunca, dersin eğitmenine anında.',
+    icon: '🧑‍🏫',
+    category: 'event',
   },
 };
 
@@ -108,6 +116,23 @@ export const DEFAULT_RULES = {
       en: { title: 'Booking Cancelled', body: '{isim}, your booking for {ders} on {tarih} at {saat} was cancelled.' },
     },
   },
+  // Goes to the lesson's trainer (lessons/{id}.trainerId), not to the member.
+  // {isim} is the trainer, {ogrenci} the member who joined.
+  [RULE_TYPES.TRAINER_BOOKING]: {
+    ruleType: RULE_TYPES.TRAINER_BOOKING,
+    enabled: true,
+    priority: 'normal',
+    template: {
+      tr: {
+        title: 'Derse Yeni Rezervasyon',
+        body: '{tarih} {saat} {ders} dersinize {ogrenci} rezervasyon yaptı.',
+      },
+      en: {
+        title: 'New Class Booking',
+        body: '{ogrenci} booked your {ders} class on {tarih} at {saat}.',
+      },
+    },
+  },
 };
 
 export const PRIORITIES = [
@@ -123,6 +148,7 @@ export const SAMPLE_VARS = {
   saat: '18:00',
   tarih: '01.07.2026',
   kredi: 3,
+  ogrenci: 'Ayşe Yılmaz',
 };
 
 const PLACEHOLDER_RE = /\{(\w+)\}/g;

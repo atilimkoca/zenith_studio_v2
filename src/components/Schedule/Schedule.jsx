@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Schedule.css';
 import scheduleService from '../../services/scheduleService';
+import { buildWeeklySchedule } from '../../services/weeklySchedule';
 import trainersService from '../../services/trainersService';
 import memberService from '../../services/memberService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -405,6 +406,51 @@ const Schedule = () => {
     loadDataWithComparison();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWeek]);
+
+  // Live updates: subscribe to the lessons collection so bookings and
+  // cancellations made from the mobile app show up without a manual refresh.
+  // The one-time load above still runs (trainers, previous-week comparison);
+  // this listener simply keeps `schedule` current afterwards. Errors are
+  // logged by the service and the last known schedule stays on screen.
+  useEffect(() => {
+    if (!import.meta.env.VITE_FIREBASE_PROJECT_ID || import.meta.env.VITE_FIREBASE_PROJECT_ID === 'placeholder-project') {
+      return undefined;
+    }
+
+    const liveWeekDates = getWeekDates(currentWeek);
+    const weekStart = new Date(liveWeekDates[0]);
+    const weekEnd = new Date(liveWeekDates[6]);
+
+    const unsubscribe = scheduleService.subscribeToLessons((lessons) => {
+      setSchedule(buildWeeklySchedule(lessons, weekStart, weekEnd, (value) => scheduleService.normalizeDate(value)));
+    });
+
+    return unsubscribe;
+  }, [currentWeek]);
+
+  // Keep the open detail / add-student modals in step with the live schedule,
+  // so a participant list changes as soon as someone books or cancels.
+  useEffect(() => {
+    const allLessons = Object.values(schedule).flat();
+    const sameParticipants = (a, b) =>
+      JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort());
+
+    if (selectedLessonForDetail) {
+      const fresh = allLessons.find((lesson) => lesson.id === selectedLessonForDetail.id);
+      if (fresh && !sameParticipants(fresh.participants, selectedLessonForDetail.participants)) {
+        setSelectedLessonForDetail((previous) => ({ ...previous, ...fresh }));
+        fetchParticipantDetails(fresh.participants || []);
+      }
+    }
+
+    if (selectedLessonForStudents) {
+      const fresh = allLessons.find((lesson) => lesson.id === selectedLessonForStudents.id);
+      if (fresh && !sameParticipants(fresh.participants, selectedLessonForStudents.participants)) {
+        setSelectedLessonForStudents((previous) => ({ ...previous, ...fresh }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedule]);
 
   const loadScheduleData = async () => {
     setLoading(true);

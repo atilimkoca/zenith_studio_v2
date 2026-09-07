@@ -392,6 +392,10 @@ class ReportsService {
             deletedAt: userData.deletedAt ? 
               new Date(userData.deletedAt).toLocaleDateString('tr-TR') : 'Tarih belirtilmemiş',
             deletionReason: userData.deletionReason || 'Sebep belirtilmemiş',
+            // Who performed the deletion. Records written before 2026-09-08 only
+            // carry the literal string 'admin', so there is no name to show.
+            deletedByLabel: userData.deletedByName
+              || (userData.deletedBy && userData.deletedBy !== 'admin' ? userData.deletedBy : 'Bilinmiyor (eski kayıt)'),
             lastVisit: userData.lastVisit ? 
               new Date(userData.lastVisit).toLocaleDateString('tr-TR') : 'Hiç ziyaret etmedi',
             membershipType: this.getMembershipTypeLabel(userData.membershipType)
@@ -418,6 +422,8 @@ class ReportsService {
               deletedAt: memberData.deletedAt ? 
                 new Date(memberData.deletedAt).toLocaleDateString('tr-TR') : 'Tarih belirtilmemiş',
               deletionReason: memberData.deletionReason || 'Sebep belirtilmemiş',
+              deletedByLabel: memberData.deletedByName
+                || (memberData.deletedBy && memberData.deletedBy !== 'admin' ? memberData.deletedBy : 'Bilinmiyor (eski kayıt)'),
               lastVisit: memberData.lastVisit ? 
                 new Date(memberData.lastVisit).toLocaleDateString('tr-TR') : 'Hiç ziyaret etmedi',
               membershipType: this.getMembershipTypeLabel(memberData.membershipType)
