@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import reportsService from '../../services/reportsService';
+import { MONTH_LABELS_TR } from '../../services/trainerLessonStats';
 import './Reports.css';
 
 const Reports = () => {
@@ -8,6 +9,7 @@ const Reports = () => {
   const [loading, setLoading] = useState(false);
   const [summaryStats, setSummaryStats] = useState({});
   const [notification, setNotification] = useState(null);
+  const [trainerYear, setTrainerYear] = useState(new Date().getFullYear());
 
   const reportTypes = [
     { id: 'dashboard', name: 'Rapor Özeti', icon: '📊' },
@@ -16,8 +18,12 @@ const Reports = () => {
     { id: 'expiredMembers', name: 'Biten Üyelik', icon: '⏰' },
     { id: 'frozenMembers', name: 'Durdurulan Üyelik', icon: '❄️' },
     { id: 'cancelledMembers', name: 'İptal Edilen Üyelik', icon: '❌' },
+    { id: 'trainerLessons', name: 'Eğitmen Dersleri', icon: '🧘' },
     { id: 'notifications', name: 'Bildirimler', icon: '🔔' }
   ];
+
+  const currentYear = new Date().getFullYear();
+  const trainerYearOptions = Array.from({ length: 4 }, (_, i) => currentYear + 1 - i);
 
   // Auto-hide notification after 3 seconds
   useEffect(() => {
@@ -68,6 +74,9 @@ const Reports = () => {
         case 'notifications':
           result = await reportsService.getNotificationsReport();
           break;
+        case 'trainerLessons':
+          result = await reportsService.getTrainerMonthlyLessonReport(trainerYear);
+          break;
         default:
           result = { success: false, error: 'Bilinmeyen rapor türü' };
       }
@@ -93,11 +102,17 @@ const Reports = () => {
       loadReportData(currentReport);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentReport]);
+  }, [currentReport, trainerYear]);
 
   const exportReport = async () => {
     if (!reportData || !reportData.data) {
       showNotification('Dışa aktarılacak veri bulunmuyor', 'warning');
+      return;
+    }
+
+    if (reportData.reportType === 'trainerLessons') {
+      const result = reportsService.exportTrainerLessonsToCSV(reportData.data);
+      showNotification(result.success ? 'Rapor başarıyla dışa aktarıldı' : result.error, result.success ? 'success' : 'error');
       return;
     }
 
@@ -203,6 +218,111 @@ const Reports = () => {
       </div>
     </div>
   );
+
+  const renderTrainerLessons = () => {
+    const stats = reportData?.data;
+    const rows = stats?.rows || [];
+    const monthTotals = stats?.monthTotals || [];
+    const currentMonthIndex = trainerYear === currentYear ? new Date().getMonth() : -1;
+
+    const renderCount = (cell) => {
+      if (!cell || (cell.done === 0 && cell.planned === 0)) {
+        return <span className="lesson-count zero">–</span>;
+      }
+      return (
+        <>
+          <span className={`lesson-count ${cell.done > 0 ? '' : 'zero'}`}>{cell.done}</span>
+          {cell.planned > 0 && <span className="lesson-planned" title="Planlı (henüz yapılmamış) ders">+{cell.planned}</span>}
+        </>
+      );
+    };
+
+    return (
+      <div className="table-container">
+        <div className="table-header">
+          <div className="table-info">
+            <h3>🧘 Eğitmen Dersleri</h3>
+            <p>
+              {stats ? `${stats.totalDone} ders yapıldı` : 'Veri yok'}
+              {stats?.totalPlanned ? ` · ${stats.totalPlanned} planlı ders` : ''}
+              {rows.length ? ` · ${rows.length} eğitmen` : ''}
+            </p>
+            <small>Rapor tarihi: {reportData?.generatedAt || '-'}</small>
+          </div>
+          <div className="table-actions">
+            <label className="year-select">
+              <span>Yıl</span>
+              <select value={trainerYear} onChange={(e) => setTrainerYear(Number(e.target.value))}>
+                {trainerYearOptions.map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </label>
+            <button className="export-btn" onClick={exportReport} disabled={!rows.length}>
+              📊 CSV'ye Aktar
+            </button>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="no-data">
+            <p>{trainerYear} yılı için ders kaydı bulunamadı.</p>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table className="report-table trainer-lessons-table">
+              <thead>
+                <tr>
+                  <th className="sticky-col">Eğitmen</th>
+                  {MONTH_LABELS_TR.map((label, index) => (
+                    <th key={label} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>{label}</th>
+                  ))}
+                  <th className="total-col">Toplam</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.trainerId || row.trainerName}>
+                    <td className="sticky-col trainer-name">{row.trainerName}</td>
+                    {row.months.map((cell, index) => (
+                      <td key={index} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>
+                        {renderCount(cell)}
+                      </td>
+                    ))}
+                    <td className="total-col">
+                      <span className="lesson-count total">{row.totalDone}</span>
+                      {row.totalPlanned > 0 && <span className="lesson-planned">+{row.totalPlanned}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="sticky-col">Toplam</td>
+                  {monthTotals.map((cell, index) => (
+                    <td key={index} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>
+                      {renderCount(cell)}
+                    </td>
+                  ))}
+                  <td className="total-col">
+                    <span className="lesson-count total">{stats.totalDone}</span>
+                    {stats.totalPlanned > 0 && <span className="lesson-planned">+{stats.totalPlanned}</span>}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+            <div className="table-legend">
+              <span><strong>Sayı</strong>: yapılan ders (tamamlanan veya tarihi geçmiş, iptal edilmemiş)</span>
+              <span><span className="lesson-planned">+N</span>: planlı, henüz yapılmamış ders</span>
+              {stats.skippedWithoutDate > 0 && (
+                <span>{stats.skippedWithoutDate} ders tarih bilgisi olmadığı için sayılmadı</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderTable = () => {
     if (!reportData || !reportData.data) {
@@ -390,6 +510,8 @@ const Reports = () => {
           </div>
         ) : currentReport === 'dashboard' ? (
           renderDashboard()
+        ) : currentReport === 'trainerLessons' ? (
+          renderTrainerLessons()
         ) : (
           renderTable()
         )}

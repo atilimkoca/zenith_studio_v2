@@ -1,9 +1,28 @@
 // Reports Service
 import { 
   collection, 
-  getDocs
+  getDocs,
+  query,
+  where
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import trainersService from './trainersService';
+import { buildTrainerMonthlyStats, trainerStatsToCsvRows } from './trainerLessonStats';
+import { lessonDateKey } from './lessonDateKey';
+
+// Mirrors scheduleService.normalizeDate for the date shapes stored on lessons.
+const normalizeLessonDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'object' && typeof value.toDate === 'function') return value.toDate();
+  if (typeof value === 'object' && typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [y, m, d] = value.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
 
 class ReportsService {
   constructor() {
@@ -808,6 +827,96 @@ class ReportsService {
     }
   }
 
+  // Trainer x month lesson counts for one calendar year.
+  // Uses the scheduledDateKey single-field range so we don't download every lesson.
+  async getTrainerMonthlyLessonReport(year) {
+    try {
+      const reportYear = Number(year) || new Date().getFullYear();
+      console.log(`🔄 Generating trainer lesson report for ${reportYear}...`);
+
+      const lessonsQuery = query(
+        collection(db, 'lessons'),
+        where('scheduledDateKey', '>=', `${reportYear}-01-01`),
+        where('scheduledDateKey', '<=', `${reportYear}-12-31`)
+      );
+
+      const [lessonsSnapshot, trainersResult] = await Promise.all([
+        getDocs(lessonsQuery),
+        trainersService.getAllTrainers()
+      ]);
+
+      const lessons = [];
+      lessonsSnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        lessons.push({
+          id: docSnap.id,
+          ...data,
+          // Old documents may lack the key; derive it from scheduledDate.
+          scheduledDateKey: data.scheduledDateKey || lessonDateKey(data.scheduledDate, normalizeLessonDate)
+        });
+      });
+
+      const trainers = (trainersResult.trainers || []).filter(
+        (trainer) => trainer.role === 'instructor' && trainer.status !== 'deleted' && trainer.status !== 'permanently_deleted'
+      );
+
+      const stats = buildTrainerMonthlyStats(lessons, {
+        year: reportYear,
+        todayKey: lessonDateKey(new Date(), normalizeLessonDate),
+        trainers
+      });
+
+      console.log(`✅ Trainer lesson report: ${stats.rows.length} trainers, ${stats.totalDone} lessons held`);
+
+      return {
+        success: true,
+        data: stats,
+        reportType: 'trainerLessons',
+        generatedAt: new Date().toLocaleString('tr-TR')
+      };
+    } catch (error) {
+      console.error('❌ Error generating trainer lesson report:', error);
+      return {
+        success: false,
+        error: 'Eğitmen ders raporu oluşturulurken bir hata oluştu.'
+      };
+    }
+  }
+
+  exportTrainerLessonsToCSV(stats) {
+    try {
+      if (!stats || !stats.rows || !stats.rows.length) {
+        throw new Error('No data to export');
+      }
+      const csvContent = trainerStatsToCsvRows(stats)
+        .map((row) => row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+      this.downloadCSV(csvContent, `egitmen_dersleri_${stats.year}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error exporting trainer lessons to CSV:', error);
+      return {
+        success: false,
+        error: 'CSV export işleminde bir hata oluştu.'
+      };
+    }
+  }
+
+  // Trigger a browser download of `csvContent` (adds the UTF-8 BOM for Excel).
+  downloadCSV(csvContent, baseName) {
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${baseName}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   // Export report to CSV format
   exportToCSV(reportData, reportType) {
     try {
@@ -821,20 +930,7 @@ class ReportsService {
         ...reportData.map(row => this.formatCSVRow(row, reportType))
       ].join('\n');
 
-      // Add BOM for proper UTF-8 encoding (fixes Turkish characters)
-      const BOM = '\uFEFF';
-      const csvWithBOM = BOM + csvContent;
-
-      // Create and trigger download
-      const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${reportType}_${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      this.downloadCSV(csvContent, reportType);
 
       return { success: true };
     } catch (error) {
