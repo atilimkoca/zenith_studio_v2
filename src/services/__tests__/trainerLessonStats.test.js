@@ -117,3 +117,53 @@ describe('buildTrainerMonthlyStats', () => {
     assert.equal(result.monthTotals.length, 12);
   });
 });
+
+describe('buildTrainerMonthlyStats – group vs individual', () => {
+  test('classifies lesson types and counts each category per month', () => {
+    const result = buildTrainerMonthlyStats([
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-01', lessonType: 'group' }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-02', lessonType: 'one-on-one' }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-03', lessonType: 'bireysel' }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-04', lessonType: 'individual' }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-05', lessonType: undefined, maxParticipants: 1 }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-06', lessonType: undefined, maxParticipants: 8 }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-07' }),                 // no info → group
+      lesson({ status: 'active', scheduledDateKey: '2026-10-01', lessonType: 'one-on-one' }) // planned individual
+    ], options);
+
+    const row = result.rows[0];
+    const march = row.months[2];
+    assert.equal(march.done, 7);
+    assert.equal(march.group.done, 3);
+    assert.equal(march.individual.done, 4);
+    assert.equal(row.months[9].individual.planned, 1);
+    assert.equal(row.months[9].group.planned, 0);
+
+    assert.equal(row.groupDone, 3);
+    assert.equal(row.individualDone, 4);
+    assert.equal(row.groupPlanned, 0);
+    assert.equal(row.individualPlanned, 1);
+
+    assert.equal(result.monthTotals[2].group.done, 3);
+    assert.equal(result.monthTotals[2].individual.done, 4);
+    assert.equal(result.groupDone, 3);
+    assert.equal(result.individualDone, 4);
+    assert.equal(result.individualPlanned, 1);
+  });
+
+  test('CSV has one row per trainer and category', async () => {
+    const { trainerStatsToCsvRows } = await import('../trainerLessonStats.js');
+    const stats = buildTrainerMonthlyStats([
+      lesson({ status: 'completed', scheduledDateKey: '2026-01-10', lessonType: 'group' }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-01-11', lessonType: 'one-on-one' })
+    ], options);
+    const rows = trainerStatsToCsvRows(stats);
+
+    assert.deepEqual(rows[0].slice(0, 3), ['Eğitmen', 'Kategori', 'Oca']);
+    assert.deepEqual(rows[1].slice(0, 3), ['Ayşe Yılmaz', 'Tümü', 2]);
+    assert.deepEqual(rows[2].slice(0, 3), ['Ayşe Yılmaz', 'Grup', 1]);
+    assert.deepEqual(rows[3].slice(0, 3), ['Ayşe Yılmaz', 'Birebir', 1]);
+    assert.deepEqual(rows[4].slice(0, 3), ['Toplam', 'Tümü', 2]);
+    assert.equal(rows.length, 1 + 3 + 3);
+  });
+});

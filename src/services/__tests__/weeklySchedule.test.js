@@ -63,3 +63,77 @@ describe('buildWeeklySchedule', () => {
     assert.deepEqual(lessons.map((l) => l.id), ['late', 'early']);
   });
 });
+
+// --- Day / date consistency helpers -----------------------------------------
+// Regression: editing a lesson's "Gün" on the web left `scheduledDate` on the
+// old weekday, so the lesson vanished from the calendar while it kept living
+// in the student's list (2026-09-10).
+import { dayKeyForDate, shiftDateToWeekday, reconcileDayOfWeek } from '../weeklySchedule.js';
+
+describe('dayKeyForDate', () => {
+  test('maps JS weekdays onto Monday-first DAY_KEYS', () => {
+    assert.equal(dayKeyForDate(new Date(2026, 8, 7)), 'monday');
+    assert.equal(dayKeyForDate(new Date(2026, 8, 16)), 'wednesday');
+    assert.equal(dayKeyForDate(new Date(2026, 8, 13)), 'sunday');
+  });
+
+  test('returns null for invalid input', () => {
+    assert.equal(dayKeyForDate(null), null);
+    assert.equal(dayKeyForDate(new Date('nope')), null);
+  });
+});
+
+describe('shiftDateToWeekday', () => {
+  test('moves the date to the requested weekday inside the same Monday–Sunday week', () => {
+    const wed = new Date(2026, 8, 16);
+    assert.equal(shiftDateToWeekday(wed, 'thursday').getTime(), new Date(2026, 8, 17).getTime());
+    assert.equal(shiftDateToWeekday(wed, 'monday').getTime(), new Date(2026, 8, 14).getTime());
+    assert.equal(shiftDateToWeekday(wed, 'sunday').getTime(), new Date(2026, 8, 20).getTime());
+  });
+
+  test('a Sunday belongs to the week that started the previous Monday', () => {
+    const sun = new Date(2026, 8, 13);
+    assert.equal(shiftDateToWeekday(sun, 'monday').getTime(), new Date(2026, 8, 7).getTime());
+  });
+
+  test('does not mutate the input and keeps the same day when already matching', () => {
+    const wed = new Date(2026, 8, 16);
+    const out = shiftDateToWeekday(wed, 'wednesday');
+    assert.notEqual(out, wed);
+    assert.equal(out.getTime(), wed.getTime());
+    assert.equal(wed.getDate(), 16);
+  });
+
+  test('returns null for an unknown day key or invalid date', () => {
+    assert.equal(shiftDateToWeekday(new Date(2026, 8, 16), 'funday'), null);
+    assert.equal(shiftDateToWeekday(null, 'monday'), null);
+  });
+});
+
+describe('reconcileDayOfWeek', () => {
+  test('derives dayOfWeek from scheduledDate when they disagree', () => {
+    const out = reconcileDayOfWeek({ dayOfWeek: 'thursday', scheduledDate: '2026-09-16' }, normalizeDate);
+    assert.equal(out.dayOfWeek, 'wednesday');
+    assert.equal(out.scheduledDate, '2026-09-16');
+  });
+
+  test('leaves a consistent payload untouched', () => {
+    const input = { dayOfWeek: 'wednesday', scheduledDate: '2026-09-16', title: 'x' };
+    assert.deepEqual(reconcileDayOfWeek(input, normalizeDate), input);
+  });
+
+  test('fills a missing dayOfWeek from the date', () => {
+    assert.equal(reconcileDayOfWeek({ scheduledDate: '2026-09-17' }, normalizeDate).dayOfWeek, 'thursday');
+  });
+
+  test('legacy lessons without a date keep their dayOfWeek', () => {
+    const input = { dayOfWeek: 'friday' };
+    assert.deepEqual(reconcileDayOfWeek(input, normalizeDate), input);
+  });
+
+  test('does not mutate the input object', () => {
+    const input = { dayOfWeek: 'thursday', scheduledDate: '2026-09-16' };
+    reconcileDayOfWeek(input, normalizeDate);
+    assert.equal(input.dayOfWeek, 'thursday');
+  });
+});

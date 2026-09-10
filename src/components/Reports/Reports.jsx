@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import reportsService from '../../services/reportsService';
-import { MONTH_LABELS_TR } from '../../services/trainerLessonStats';
+import { MONTH_LABELS_TR, LESSON_CATEGORIES, cellForCategory, totalsForCategory } from '../../services/trainerLessonStats';
 import './Reports.css';
 
 const Reports = () => {
@@ -10,6 +10,7 @@ const Reports = () => {
   const [summaryStats, setSummaryStats] = useState({});
   const [notification, setNotification] = useState(null);
   const [trainerYear, setTrainerYear] = useState(new Date().getFullYear());
+  const [trainerCategory, setTrainerCategory] = useState('all');
 
   const reportTypes = [
     { id: 'dashboard', name: 'Rapor Özeti', icon: '📊' },
@@ -23,7 +24,6 @@ const Reports = () => {
   ];
 
   const currentYear = new Date().getFullYear();
-  const trainerYearOptions = Array.from({ length: 4 }, (_, i) => currentYear + 1 - i);
 
   // Auto-hide notification after 3 seconds
   useEffect(() => {
@@ -221,106 +221,183 @@ const Reports = () => {
 
   const renderTrainerLessons = () => {
     const stats = reportData?.data;
-    const rows = stats?.rows || [];
+    const allRows = stats?.rows || [];
+    const activeRows = allRows.filter((row) => row.totalDone > 0 || row.totalPlanned > 0);
+    const idleRows = allRows.filter((row) => row.totalDone === 0 && row.totalPlanned === 0);
     const monthTotals = stats?.monthTotals || [];
     const currentMonthIndex = trainerYear === currentYear ? new Date().getMonth() : -1;
+    const showSplit = trainerCategory === 'all';
+    const grand = totalsForCategory(stats, trainerCategory);
+    const minYear = currentYear - 2;
+    const maxYear = currentYear + 1;
 
-    const renderCount = (cell) => {
-      if (!cell || (cell.done === 0 && cell.planned === 0)) {
-        return <span className="lesson-count zero">–</span>;
-      }
+    const maxDone = activeRows.reduce((max, row) => (
+      row.months.reduce((m, cell) => Math.max(m, cellForCategory(cell, trainerCategory).done), max)
+    ), 0);
+
+    const percent = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
+    const groupShare = stats ? percent(stats.groupDone, stats.totalDone) : 0;
+
+    const cellTitle = (label, cell) => {
+      const done = cellForCategory(cell, trainerCategory).done;
+      const planned = cellForCategory(cell, trainerCategory).planned;
+      const parts = [`${label}: ${done} ders yapıldı`];
+      if (showSplit) parts.push(`Grup ${cell.group.done}, birebir ${cell.individual.done}`);
+      if (planned) parts.push(`${planned} ders planlı`);
+      return parts.join('\n');
+    };
+
+    const renderCell = (cell, label, { heat = true } = {}) => {
+      const { done, planned } = cellForCategory(cell, trainerCategory);
+      const tint = heat && done > 0 && maxDone > 0 ? 0.06 + 0.26 * (done / maxDone) : 0;
+      const split = cell.group.done + cell.individual.done;
       return (
-        <>
-          <span className={`lesson-count ${cell.done > 0 ? '' : 'zero'}`}>{cell.done}</span>
-          {cell.planned > 0 && <span className="lesson-planned" title="Planlı (henüz yapılmamış) ders">+{cell.planned}</span>}
-        </>
+        <div className="tl-cell" style={tint ? { '--tl-tint': tint } : undefined} title={cellTitle(label, cell)}>
+          <div className="tl-cell-line">
+            {done > 0 ? (
+              <span className="tl-num">{done}</span>
+            ) : planned > 0 ? null : (
+              <span className="tl-num tl-num--empty">–</span>
+            )}
+            {planned > 0 && <span className="tl-planned">+{planned}</span>}
+          </div>
+          {showSplit && split > 0 && (
+            <div className="tl-split" aria-hidden="true">
+              <span className="tl-split-group" style={{ flexGrow: cell.group.done }} />
+              <span className="tl-split-individual" style={{ flexGrow: cell.individual.done }} />
+            </div>
+          )}
+        </div>
       );
     };
 
+    const rowTotalCell = (totals) => ({
+      done: totals.totalDone,
+      planned: totals.totalPlanned,
+      group: { done: totals.groupDone, planned: totals.groupPlanned },
+      individual: { done: totals.individualDone, planned: totals.individualPlanned }
+    });
+
     return (
-      <div className="table-container">
-        <div className="table-header">
-          <div className="table-info">
-            <h3>🧘 Eğitmen Dersleri</h3>
+      <section className="tl">
+        <header className="tl-head">
+          <div className="tl-title">
+            <h3>Eğitmen dersleri</h3>
             <p>
-              {stats ? `${stats.totalDone} ders yapıldı` : 'Veri yok'}
-              {stats?.totalPlanned ? ` · ${stats.totalPlanned} planlı ders` : ''}
-              {rows.length ? ` · ${rows.length} eğitmen` : ''}
+              {stats
+                ? `${trainerYear} yılında ${grand.done} ders yapıldı${grand.planned ? `, ${grand.planned} ders planlı` : ''}.`
+                : 'Veri yükleniyor.'}
             </p>
-            <small>Rapor tarihi: {reportData?.generatedAt || '-'}</small>
           </div>
-          <div className="table-actions">
-            <label className="year-select">
-              <span>Yıl</span>
-              <select value={trainerYear} onChange={(e) => setTrainerYear(Number(e.target.value))}>
-                {trainerYearOptions.map((year) => (
-                  <option key={year} value={year}>{year}</option>
-                ))}
-              </select>
-            </label>
-            <button className="export-btn" onClick={exportReport} disabled={!rows.length}>
-              📊 CSV'ye Aktar
+          <div className="tl-tools">
+            <div className="tl-segmented" role="tablist" aria-label="Ders kategorisi">
+              {LESSON_CATEGORIES.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={trainerCategory === category.id}
+                  className={`tl-seg ${trainerCategory === category.id ? 'is-active' : ''}`}
+                  onClick={() => setTrainerCategory(category.id)}
+                >
+                  {category.id !== 'all' && <span className={`tl-dot tl-dot--${category.id}`} aria-hidden="true" />}
+                  {category.label}
+                </button>
+              ))}
+            </div>
+            <div className="tl-year" aria-label="Yıl">
+              <button type="button" onClick={() => setTrainerYear((y) => y - 1)} disabled={trainerYear <= minYear} aria-label="Önceki yıl">‹</button>
+              <span>{trainerYear}</span>
+              <button type="button" onClick={() => setTrainerYear((y) => y + 1)} disabled={trainerYear >= maxYear} aria-label="Sonraki yıl">›</button>
+            </div>
+            <button type="button" className="tl-export" onClick={exportReport} disabled={!activeRows.length}>
+              CSV indir
             </button>
           </div>
-        </div>
+        </header>
 
-        {rows.length === 0 ? (
-          <div className="no-data">
-            <p>{trainerYear} yılı için ders kaydı bulunamadı.</p>
+        {stats && stats.totalDone > 0 && (
+          <div className="tl-share" role="img" aria-label={`Grup ${stats.groupDone} ders, birebir ${stats.individualDone} ders`}>
+            <span className="tl-share-label"><span className="tl-dot tl-dot--group" aria-hidden="true" />Grup <strong>{stats.groupDone}</strong> <em>%{groupShare}</em></span>
+            <div className="tl-share-bar">
+              <span className="tl-split-group" style={{ flexGrow: stats.groupDone }} />
+              <span className="tl-split-individual" style={{ flexGrow: stats.individualDone }} />
+            </div>
+            <span className="tl-share-label tl-share-label--end"><em>%{100 - groupShare}</em> <strong>{stats.individualDone}</strong> Birebir<span className="tl-dot tl-dot--individual" aria-hidden="true" /></span>
+          </div>
+        )}
+
+        {activeRows.length === 0 ? (
+          <div className="tl-empty">
+            <p>{trainerYear} yılında ders kaydı yok.</p>
+            <small>Başka bir yıl seçin ya da ders programından ders ekleyin.</small>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="report-table trainer-lessons-table">
+          <div className="tl-scroll">
+            <table className="tl-table">
               <thead>
                 <tr>
-                  <th className="sticky-col">Eğitmen</th>
+                  <th scope="col" className="tl-col-name">Eğitmen</th>
                   {MONTH_LABELS_TR.map((label, index) => (
-                    <th key={label} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>{label}</th>
+                    <th
+                      key={label}
+                      scope="col"
+                      className={`tl-col-month ${index === currentMonthIndex ? 'is-current' : ''}`}
+                      title={index === currentMonthIndex ? 'Bu ay' : undefined}
+                    >
+                      {label}
+                    </th>
                   ))}
-                  <th className="total-col">Toplam</th>
+                  <th scope="col" className="tl-col-total">{trainerYear}</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {activeRows.map((row) => (
                   <tr key={row.trainerId || row.trainerName}>
-                    <td className="sticky-col trainer-name">{row.trainerName}</td>
+                    <th scope="row" className="tl-col-name">{row.trainerName}</th>
                     {row.months.map((cell, index) => (
-                      <td key={index} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>
-                        {renderCount(cell)}
+                      <td key={index} className={`tl-col-month ${index === currentMonthIndex ? 'is-current' : ''}`}>
+                        {renderCell(cell, `${row.trainerName}, ${MONTH_LABELS_TR[index]} ${trainerYear}`)}
                       </td>
                     ))}
-                    <td className="total-col">
-                      <span className="lesson-count total">{row.totalDone}</span>
-                      {row.totalPlanned > 0 && <span className="lesson-planned">+{row.totalPlanned}</span>}
+                    <td className="tl-col-total">
+                      {renderCell(rowTotalCell(row), `${row.trainerName}, ${trainerYear}`, { heat: false })}
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td className="sticky-col">Toplam</td>
+                  <th scope="row" className="tl-col-name">Toplam</th>
                   {monthTotals.map((cell, index) => (
-                    <td key={index} className={`month-col ${index === currentMonthIndex ? 'current-month' : ''}`}>
-                      {renderCount(cell)}
+                    <td key={index} className={`tl-col-month ${index === currentMonthIndex ? 'is-current' : ''}`}>
+                      {renderCell(cell, `Tüm eğitmenler, ${MONTH_LABELS_TR[index]} ${trainerYear}`, { heat: false })}
                     </td>
                   ))}
-                  <td className="total-col">
-                    <span className="lesson-count total">{stats.totalDone}</span>
-                    {stats.totalPlanned > 0 && <span className="lesson-planned">+{stats.totalPlanned}</span>}
+                  <td className="tl-col-total">
+                    {renderCell(rowTotalCell(stats), `Tüm eğitmenler, ${trainerYear}`, { heat: false })}
                   </td>
                 </tr>
               </tfoot>
             </table>
-            <div className="table-legend">
-              <span><strong>Sayı</strong>: yapılan ders (tamamlanan veya tarihi geçmiş, iptal edilmemiş)</span>
-              <span><span className="lesson-planned">+N</span>: planlı, henüz yapılmamış ders</span>
-              {stats.skippedWithoutDate > 0 && (
-                <span>{stats.skippedWithoutDate} ders tarih bilgisi olmadığı için sayılmadı</span>
-              )}
-            </div>
           </div>
         )}
-      </div>
+
+        <footer className="tl-foot">
+          <p>
+            Sayılar yapılan dersleri gösterir: tamamlanmış ya da tarihi geçmiş, iptal edilmemiş dersler.
+            {' '}<span className="tl-planned">+N</span> henüz yapılmamış planlı ders sayısıdır.
+            {showSplit && ' Sayının altındaki çubuk grup ve birebir dersin payını gösterir.'}
+          </p>
+          {idleRows.length > 0 && (
+            <p>Bu yıl ders kaydı olmayan eğitmenler: {idleRows.map((row) => row.trainerName).join(', ')}.</p>
+          )}
+          {stats?.skippedWithoutDate > 0 && (
+            <p>{stats.skippedWithoutDate} ders tarih bilgisi olmadığı için sayılmadı.</p>
+          )}
+          <small>Rapor tarihi: {reportData?.generatedAt || '-'}</small>
+        </footer>
+      </section>
     );
   };
 

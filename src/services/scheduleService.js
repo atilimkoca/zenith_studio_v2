@@ -9,7 +9,7 @@ import {
   BookingError,
   isBookingError
 } from './bookingTransactions.js';
-import { buildWeeklySchedule, emptyWeek } from './weeklySchedule.js';
+import { buildWeeklySchedule, emptyWeek, reconcileDayOfWeek } from './weeklySchedule.js';
 import { lessonDateKey } from './lessonDateKey.js';
 
 // Error texts for the participant API used by the lesson detail modal.
@@ -77,7 +77,8 @@ class ScheduleService {
   async createLesson(lessonData) {
     try {
       const lesson = {
-        ...lessonData,
+        // dayOfWeek must match scheduledDate or the lesson is invisible in one view.
+        ...reconcileDayOfWeek(lessonData, (value) => this.normalizeDate(value)),
         // Day key lets clients query one day instead of the whole collection.
         scheduledDateKey: lessonDateKey(lessonData.scheduledDate, (value) => this.normalizeDate(value)),
         createdAt: serverTimestamp(),
@@ -257,7 +258,11 @@ class ScheduleService {
     try {
       const lessonRef = doc(db, 'lessons', lessonId);
       
-      const payload = { ...updates, updatedAt: serverTimestamp() };
+      // dayOfWeek must match scheduledDate or the lesson is invisible in one view.
+      const payload = {
+        ...reconcileDayOfWeek(updates, (value) => this.normalizeDate(value)),
+        updatedAt: serverTimestamp()
+      };
       if (Object.prototype.hasOwnProperty.call(updates, 'scheduledDate')) {
         payload.scheduledDateKey = lessonDateKey(updates.scheduledDate, (value) => this.normalizeDate(value));
       }

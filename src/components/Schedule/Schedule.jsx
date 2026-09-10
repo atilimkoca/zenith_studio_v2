@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Schedule.css';
 import scheduleService from '../../services/scheduleService';
-import { buildWeeklySchedule } from '../../services/weeklySchedule';
+import { buildWeeklySchedule, shiftDateToWeekday } from '../../services/weeklySchedule';
 import trainersService from '../../services/trainersService';
 import memberService from '../../services/memberService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -785,6 +785,16 @@ const Schedule = () => {
       if (field === 'trainerId') {
         const selectedTrainer = trainers.find(t => t.id === value);
         updated.trainerName = selectedTrainer ? selectedTrainer.displayName : '';
+      }
+
+      // Keep the concrete date in step with the chosen weekday. Otherwise a
+      // lesson moved Wed → Thu keeps its Wednesday scheduledDate, drops out of
+      // the calendar (dayOfWeek/date mismatch) and lingers in student lists.
+      if (field === 'dayOfWeek' && updated.scheduledDate) {
+        const shifted = shiftDateToWeekday(parseDateAsLocal(updated.scheduledDate), value);
+        if (shifted) {
+          updated.scheduledDate = formatDateToLocalString(shifted);
+        }
       }
 
       return updated;

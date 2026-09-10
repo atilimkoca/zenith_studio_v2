@@ -51,3 +51,44 @@ export const buildWeeklySchedule = (lessons, startDate, endDate, normalizeDate) 
 
   return week;
 };
+
+// --- Day / date consistency -------------------------------------------------
+// A dated lesson carries both `scheduledDate` and `dayOfWeek`. Clients read
+// them differently (the web calendar buckets by dayOfWeek, the mobile app and
+// the calendar's week filter use scheduledDate), so the two must always agree
+// or the lesson silently disappears from one of the views.
+
+const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime());
+
+/** Monday-first day key ('monday'…'sunday') for a Date, or null when invalid. */
+export const dayKeyForDate = (date) => {
+  if (!isValidDate(date)) return null;
+  return DAY_KEYS[(date.getDay() + 6) % 7];
+};
+
+/**
+ * Return a new Date on `dayKey` within the same Monday–Sunday week as `date`
+ * (time-of-day preserved). Null when `date` is invalid or `dayKey` unknown.
+ */
+export const shiftDateToWeekday = (date, dayKey) => {
+  if (!isValidDate(date)) return null;
+  const targetIndex = DAY_KEYS.indexOf(dayKey);
+  if (targetIndex === -1) return null;
+  const currentIndex = (date.getDay() + 6) % 7;
+  const shifted = new Date(date.getTime());
+  shifted.setDate(shifted.getDate() + (targetIndex - currentIndex));
+  return shifted;
+};
+
+/**
+ * Make `dayOfWeek` agree with `scheduledDate` in a lesson payload. The date is
+ * the source of truth; a missing or wrong `dayOfWeek` is replaced. Payloads
+ * without a usable date (legacy recurring lessons) are returned as-is. Never
+ * mutates the input.
+ */
+export const reconcileDayOfWeek = (payload, normalizeDate) => {
+  if (!payload || !payload.scheduledDate) return payload;
+  const derived = dayKeyForDate(normalizeDate(payload.scheduledDate));
+  if (!derived || payload.dayOfWeek === derived) return payload;
+  return { ...payload, dayOfWeek: derived };
+};
