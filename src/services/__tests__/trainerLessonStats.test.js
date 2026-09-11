@@ -8,6 +8,7 @@ const lesson = (overrides) => ({
   trainerName: 'Ayşe Yılmaz',
   status: 'active',
   scheduledDateKey: '2026-03-10',
+  participants: ['student-1'],
   ...overrides
 });
 
@@ -165,5 +166,35 @@ describe('buildTrainerMonthlyStats – group vs individual', () => {
     assert.deepEqual(rows[3].slice(0, 3), ['Ayşe Yılmaz', 'Birebir', 1]);
     assert.deepEqual(rows[4].slice(0, 3), ['Toplam', 'Tümü', 2]);
     assert.equal(rows.length, 1 + 3 + 3);
+  });
+});
+
+describe('buildTrainerMonthlyStats – empty slots', () => {
+  test('a lesson nobody booked is a free slot, not a lesson the trainer taught', () => {
+    const result = buildTrainerMonthlyStats([
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-10', participants: ['u1'] }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-11', participants: ['u1', 'u2'] }),
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-12', participants: [] }),   // auto-completed empty slot
+      lesson({ status: 'completed', scheduledDateKey: '2026-03-13', participants: undefined }), // no participants field
+      lesson({ status: 'active', scheduledDateKey: '2026-10-01', participants: [] }),      // open future slot
+      lesson({ status: 'active', scheduledDateKey: '2026-10-02', participants: ['u3'] })   // booked future lesson
+    ], options);
+
+    const row = result.rows[0];
+    assert.equal(row.months[2].done, 2);
+    assert.equal(row.months[2].students, 3);
+    assert.equal(row.months[9].planned, 1);
+    assert.equal(row.totalDone, 2);
+    assert.equal(row.totalPlanned, 1);
+    assert.equal(row.totalStudents, 3);
+    assert.equal(result.totalStudents, 3);
+    assert.equal(result.emptyPastSlots, 2);
+    assert.equal(result.emptyFutureSlots, 1);
+  });
+
+  test('other tests default to a booked lesson', () => {
+    // `lesson()` fixture above has no participants; this guards the fixture change below.
+    const result = buildTrainerMonthlyStats([lesson({ status: 'completed' })], options);
+    assert.equal(result.totalDone, 1);
   });
 });

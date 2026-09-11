@@ -28,8 +28,9 @@ export const lessonCategory = (lesson) => {
 const emptyCell = () => ({
   done: 0,
   planned: 0,
-  group: { done: 0, planned: 0 },
-  individual: { done: 0, planned: 0 }
+  students: 0,
+  group: { done: 0, planned: 0, students: 0 },
+  individual: { done: 0, planned: 0, students: 0 }
 });
 
 const emptyMonths = () => Array.from({ length: 12 }, emptyCell);
@@ -37,16 +38,35 @@ const emptyMonths = () => Array.from({ length: 12 }, emptyCell);
 const emptyTotals = () => ({
   totalDone: 0,
   totalPlanned: 0,
+  totalStudents: 0,
   groupDone: 0,
   groupPlanned: 0,
+  groupStudents: 0,
   individualDone: 0,
-  individualPlanned: 0
+  individualPlanned: 0,
+  individualStudents: 0
 });
 
-const addToTotals = (totals, category, bucket) => {
+const addToTotals = (totals, category, bucket, students) => {
   totals[bucket === 'done' ? 'totalDone' : 'totalPlanned'] += 1;
   totals[`${category}${bucket === 'done' ? 'Done' : 'Planned'}`] += 1;
+  if (bucket === 'done') {
+    totals.totalStudents += students;
+    totals[`${category}Students`] += students;
+  }
 };
+
+const addToCell = (cell, category, bucket, students) => {
+  cell[bucket] += 1;
+  cell[category][bucket] += 1;
+  if (bucket === 'done') {
+    cell.students += students;
+    cell[category].students += students;
+  }
+};
+
+/** Booked students on a lesson. `participants` is the array bookingCore maintains. */
+export const studentCount = (lesson) => (Array.isArray(lesson.participants) ? lesson.participants.length : 0);
 
 const trainerDisplayName = (trainer) => {
   if (!trainer) return '';
@@ -55,7 +75,11 @@ const trainerDisplayName = (trainer) => {
 };
 
 /**
- * @param {Array<object>} lessons  lesson documents (need scheduledDateKey, status, trainerId, trainerName, lessonType)
+ * A lesson document is a time slot. It only counts as a lesson the trainer
+ * taught (or will teach) when at least one student is booked on it; slots
+ * nobody booked are reported separately as empty slots.
+ *
+ * @param {Array<object>} lessons  lesson documents (need scheduledDateKey, status, trainerId, trainerName, lessonType, participants)
  * @param {object} options
  * @param {number} options.year  calendar year to report on
  * @param {string} options.todayKey  today's "YYYY-MM-DD"; lessons strictly before it count as held
@@ -67,6 +91,8 @@ export const buildTrainerMonthlyStats = (lessons, { year, todayKey, trainers = [
   const monthTotals = emptyMonths();
   const grandTotals = emptyTotals();
   let skippedWithoutDate = 0;
+  let emptyPastSlots = 0;
+  let emptyFutureSlots = 0;
 
   const trainerById = new Map(trainers.map((trainer) => [trainer.id, trainer]));
 
@@ -98,16 +124,20 @@ export const buildTrainerMonthlyStats = (lessons, { year, todayKey, trainers = [
     if (monthIndex < 0 || monthIndex > 11) return;
 
     const isDone = lesson.status === 'completed' || dateKey < todayKey;
+    const students = studentCount(lesson);
+    if (students === 0) {
+      if (isDone) emptyPastSlots += 1; else emptyFutureSlots += 1;
+      return;
+    }
+
     const bucket = isDone ? 'done' : 'planned';
     const category = lessonCategory(lesson);
     const row = rowFor(lesson.trainerId, lesson.trainerName);
 
-    row.months[monthIndex][bucket] += 1;
-    row.months[monthIndex][category][bucket] += 1;
-    monthTotals[monthIndex][bucket] += 1;
-    monthTotals[monthIndex][category][bucket] += 1;
-    addToTotals(row, category, bucket);
-    addToTotals(grandTotals, category, bucket);
+    addToCell(row.months[monthIndex], category, bucket, students);
+    addToCell(monthTotals[monthIndex], category, bucket, students);
+    addToTotals(row, category, bucket, students);
+    addToTotals(grandTotals, category, bucket, students);
   });
 
   const rows = Array.from(rowsById.values()).sort((a, b) => {
@@ -120,31 +150,33 @@ export const buildTrainerMonthlyStats = (lessons, { year, todayKey, trainers = [
     rows,
     monthTotals,
     ...grandTotals,
-    skippedWithoutDate
+    skippedWithoutDate,
+    emptyPastSlots,
+    emptyFutureSlots
   };
 };
 
 /** Read the done/planned pair for a category ('all' | 'group' | 'individual') out of a month cell. */
 export const cellForCategory = (cell, category) => {
-  if (!cell) return { done: 0, planned: 0 };
+  if (!cell) return { done: 0, planned: 0, students: 0 };
   if (category === 'group' || category === 'individual') return cell[category];
-  return { done: cell.done, planned: cell.planned };
+  return { done: cell.done, planned: cell.planned, students: cell.students };
 };
 
 /** Read the done/planned pair for a category out of a row or the stats object. */
 export const totalsForCategory = (totals, category) => {
-  if (!totals) return { done: 0, planned: 0 };
-  if (category === 'group') return { done: totals.groupDone, planned: totals.groupPlanned };
-  if (category === 'individual') return { done: totals.individualDone, planned: totals.individualPlanned };
-  return { done: totals.totalDone, planned: totals.totalPlanned };
+  if (!totals) return { done: 0, planned: 0, students: 0 };
+  if (category === 'group') return { done: totals.groupDone, planned: totals.groupPlanned, students: totals.groupStudents };
+  if (category === 'individual') return { done: totals.individualDone, planned: totals.individualPlanned, students: totals.individualStudents };
+  return { done: totals.totalDone, planned: totals.totalPlanned, students: totals.totalStudents };
 };
 
 /** CSV rows (arrays of cells) for the report, header first; one row per trainer and category. */
 export const trainerStatsToCsvRows = (stats) => {
-  const header = ['Eğitmen', 'Kategori', ...MONTH_LABELS_TR, 'Toplam', 'Planlı'];
+  const header = ['Eğitmen', 'Kategori', ...MONTH_LABELS_TR, 'Toplam', 'Öğrenci', 'Planlı'];
   const rowsFor = (name, months, totals) => LESSON_CATEGORIES.map(({ id, label }) => {
     const total = totalsForCategory(totals, id);
-    return [name, label, ...months.map((m) => cellForCategory(m, id).done), total.done, total.planned];
+    return [name, label, ...months.map((m) => cellForCategory(m, id).done), total.done, total.students, total.planned];
   });
   return [
     header,

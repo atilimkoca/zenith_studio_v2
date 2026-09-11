@@ -239,9 +239,9 @@ const Reports = () => {
     const groupShare = stats ? percent(stats.groupDone, stats.totalDone) : 0;
 
     const cellTitle = (label, cell) => {
-      const done = cellForCategory(cell, trainerCategory).done;
-      const planned = cellForCategory(cell, trainerCategory).planned;
+      const { done, planned, students } = cellForCategory(cell, trainerCategory);
       const parts = [`${label}: ${done} ders yapıldı`];
+      if (students) parts.push(`${students} öğrenci katılımı`);
       if (showSplit) parts.push(`Grup ${cell.group.done}, birebir ${cell.individual.done}`);
       if (planned) parts.push(`${planned} ders planlı`);
       return parts.join('\n');
@@ -274,8 +274,9 @@ const Reports = () => {
     const rowTotalCell = (totals) => ({
       done: totals.totalDone,
       planned: totals.totalPlanned,
-      group: { done: totals.groupDone, planned: totals.groupPlanned },
-      individual: { done: totals.individualDone, planned: totals.individualPlanned }
+      students: totals.totalStudents,
+      group: { done: totals.groupDone, planned: totals.groupPlanned, students: totals.groupStudents },
+      individual: { done: totals.individualDone, planned: totals.individualPlanned, students: totals.individualStudents }
     });
 
     return (
@@ -285,7 +286,7 @@ const Reports = () => {
             <h3>Eğitmen dersleri</h3>
             <p>
               {stats
-                ? `${trainerYear} yılında ${grand.done} ders yapıldı${grand.planned ? `, ${grand.planned} ders planlı` : ''}.`
+                ? `${trainerYear} yılında ${grand.done} ders yapıldı, ${grand.students} öğrenci katıldı${grand.planned ? `, ${grand.planned} ders planlı` : ''}.`
                 : 'Veri yükleniyor.'}
             </p>
           </div>
@@ -385,10 +386,18 @@ const Reports = () => {
 
         <footer className="tl-foot">
           <p>
-            Sayılar yapılan dersleri gösterir: tamamlanmış ya da tarihi geçmiş, iptal edilmemiş dersler.
-            {' '}<span className="tl-planned">+N</span> henüz yapılmamış planlı ders sayısıdır.
+            Sayılar yapılan dersleri gösterir: en az bir öğrencinin kayıtlı olduğu, tamamlanmış ya da tarihi geçmiş, iptal edilmemiş dersler.
+            {' '}<span className="tl-planned">+N</span> öğrencisi olan, henüz yapılmamış planlı ders sayısıdır.
             {showSplit && ' Sayının altındaki çubuk grup ve birebir dersin payını gösterir.'}
           </p>
+          {stats && (stats.emptyPastSlots > 0 || stats.emptyFutureSlots > 0) && (
+            <p>
+              Kimsenin kayıt olmadığı ders saatleri sayılmadı:
+              {stats.emptyPastSlots > 0 && ` ${stats.emptyPastSlots} geçmiş`}
+              {stats.emptyPastSlots > 0 && stats.emptyFutureSlots > 0 && ','}
+              {stats.emptyFutureSlots > 0 && ` ${stats.emptyFutureSlots} gelecek`} boş saat.
+            </p>
+          )}
           {idleRows.length > 0 && (
             <p>Bu yıl ders kaydı olmayan eğitmenler: {idleRows.map((row) => row.trainerName).join(', ')}.</p>
           )}
