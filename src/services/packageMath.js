@@ -168,6 +168,14 @@ export const computeTotalRemaining = (packages, { now = new Date(), excludeExpir
     return sum + (pkg.remainingLessons || 0);
   }, 0);
 
+// Lesson ids whose credit was taken from this package (written by planDeduction
+// when the caller passes `lessonId`), so a cancellation can give it back to the
+// same package. Bookings made before this was recorded have no entry.
+const chargedIdsOf = (pkg) => (Array.isArray(pkg.chargedLessonIds) ? pkg.chargedLessonIds : []);
+
+// A package whose remaining count is below its total can take a credit back.
+const hasRoom = (pkg) => !pkg.totalLessons || (pkg.remainingLessons || 0) < pkg.totalLessons;
+
 const hasPackageArray = (data) => Array.isArray(data.packages) && data.packages.length > 0;
 const hasPackageInfo = (data) =>
   !!data.packageInfo && typeof data.packageInfo === 'object' && Object.keys(data.packageInfo).length > 0;
@@ -176,9 +184,11 @@ const hasPackageInfo = (data) =>
  * Work out how one lesson credit should be deducted for a lesson on `lessonDate`.
  * Returns either `{ ok: true, updateData, ... }` or `{ ok: false, code, message }`.
  * `updateData` never includes `updatedAt`; the caller adds it in its own format.
+ * With `options.lessonId`, the charged package remembers the lesson in
+ * `chargedLessonIds` so planRefund can return the credit to it.
  */
 export const planDeduction = (userData, lessonDate, lessonInfo = '', options = {}) => {
-  const { now = new Date(), excludeExpired = false } = options;
+  const { now = new Date(), excludeExpired = false, lessonId = null } = options;
   const timestamp = options.timestamp || now.toISOString();
   const data = userData || {};
 
@@ -215,11 +225,14 @@ export const planDeduction = (userData, lessonDate, lessonInfo = '', options = {
   }
 
   const target = eligible[0];
-  const updatedPackages = packages.map((pkg) => (
-    pkg.id === target.id
-      ? { ...pkg, remainingLessons: pkg.remainingLessons - 1, lastUsedAt: timestamp, lastUsedFor: lessonInfo }
-      : pkg
-  ));
+  const updatedPackages = packages.map((pkg) => {
+    if (pkg.id !== target.id) return pkg;
+    const charged = { ...pkg, remainingLessons: pkg.remainingLessons - 1, lastUsedAt: timestamp, lastUsedFor: lessonInfo };
+    if (lessonId) {
+      charged.chargedLessonIds = [...chargedIdsOf(pkg).filter((id) => id !== lessonId), lessonId];
+    }
+    return charged;
+  });
 
   const totalRemaining = computeTotalRemaining(updatedPackages, { now, excludeExpired });
   const updateData = {
@@ -244,11 +257,21 @@ export const planDeduction = (userData, lessonDate, lessonInfo = '', options = {
 
 /**
  * Work out how one lesson credit should be refunded for a lesson on `lessonDate`.
- * Prefers the package covering the lesson day, then the most recent active
- * package, then the last package. Never refunds above `totalLessons`.
+ *
+ * Target package, in order:
+ *   1. the package the credit was taken from (`options.lessonId` found in its
+ *      `chargedLessonIds`); this refund is exact, so it is not capped;
+ *   2. for bookings made before charges were recorded, among the packages
+ *      covering the lesson day: the one a booking would be charged from now
+ *      (has credits and room), else the last one with room, else the first;
+ *   3. the most recent active package, then the last package.
+ * Refunds chosen by date (2, 3) never go above `totalLessons`.
+ *
+ * Choosing by date alone used to send the credit to an old, used-up package
+ * that still covered the day after a renewal, where it then expired.
  */
 export const planRefund = (userData, lessonDate, lessonInfo = '', options = {}) => {
-  const { now = new Date(), excludeExpired = false } = options;
+  const { now = new Date(), excludeExpired = false, lessonId = null } = options;
   const timestamp = options.timestamp || now.toISOString();
   const data = userData || {};
 
@@ -267,7 +290,18 @@ export const planRefund = (userData, lessonDate, lessonInfo = '', options = {}) 
     };
   }
 
-  let target = packagesCoveringDate(packages, lessonDate)[0] || null;
+  let target = lessonId
+    ? packages.find((pkg) => pkg.status !== 'cancelled' && chargedIdsOf(pkg).includes(lessonId)) || null
+    : null;
+  const refundsRecordedCharge = !!target;
+
+  if (!target) {
+    const covering = packagesCoveringDate(packages, lessonDate);
+    target = covering.find((pkg) => (pkg.remainingLessons || 0) > 0 && hasRoom(pkg))
+      || [...covering].reverse().find(hasRoom)
+      || covering[0]
+      || null;
+  }
 
   if (!target) {
     const activePackages = packages
@@ -285,12 +319,16 @@ export const planRefund = (userData, lessonDate, lessonInfo = '', options = {}) 
   }
 
   const updatedPackages = packages.map((pkg) => {
-    if (pkg.id !== target.id) return pkg;
+    // The charge record is consumed by this refund wherever it sits.
+    const base = lessonId && chargedIdsOf(pkg).includes(lessonId)
+      ? { ...pkg, chargedLessonIds: chargedIdsOf(pkg).filter((id) => id !== lessonId) }
+      : pkg;
+    if (pkg.id !== target.id) return base;
     const newRemaining = (pkg.remainingLessons || 0) + 1;
     const maxLessons = pkg.totalLessons || newRemaining;
     return {
-      ...pkg,
-      remainingLessons: Math.min(newRemaining, maxLessons),
+      ...base,
+      remainingLessons: refundsRecordedCharge ? newRemaining : Math.min(newRemaining, maxLessons),
       lastRefundAt: timestamp,
       lastRefundFor: lessonInfo,
     };

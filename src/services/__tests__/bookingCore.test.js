@@ -60,6 +60,15 @@ const rejectsWithCode = async (promise, code) => {
   });
 };
 
+// Renewal overlap: the old package still covers the lesson day and holds a
+// stray credit (an earlier refund landed there), but the credit for lesson L1
+// was taken from the new package. Only the recorded charge can tell them apart.
+const overlappingPackages = () => [
+  coveringPackage({ id: 'old', startDate: new Date(2026, 7, 15).toISOString(), expiryDate: new Date(2026, 8, 15).toISOString(), remainingLessons: 1 }),
+  coveringPackage({ id: 'new', startDate: new Date(2026, 8, 5).toISOString(), expiryDate: new Date(2026, 9, 5).toISOString(), remainingLessons: 3, chargedLessonIds: ['L1'] }),
+];
+const remainingIn = (write, id) => write.data.packages.find((p) => p.id === id).remainingLessons;
+
 describe('joinLesson', () => {
   test('adds the user with arrayUnion and deducts one credit in the same transaction', async () => {
     const fs = fakeFirestore({
@@ -175,6 +184,12 @@ describe('joinLesson', () => {
     assert.ok(fs.writes.some((w) => w.path === 'members/u1'));
   });
 
+  test('records the lesson id on the package the credit was taken from', async () => {
+    const fs = fakeFirestore({ 'lessons/L1': baseLesson(), 'users/u1': { packages: [coveringPackage()] } });
+    await createBookingCore(fs.deps).joinLesson({ lessonId: 'L1', userId: 'u1' });
+    assert.deepEqual(fs.writes.find((w) => w.path === 'users/u1').data.packages[0].chargedLessonIds, ['L1']);
+  });
+
   test('accepts lessonInfo as a function of the lesson data', async () => {
     const fs = fakeFirestore({ 'lessons/L1': baseLesson(), 'users/u1': { packages: [coveringPackage()] } });
     const core = createBookingCore(fs.deps);
@@ -200,6 +215,17 @@ describe('leaveLesson', () => {
     assert.equal(userWrite.data.packages[0].remainingLessons, 5);
     assert.equal(userWrite.data.packages[0].lastRefundFor, 'Ders iptali');
     assert.equal(fs.readAfterWrite, false);
+  });
+
+  test('refunds to the package the lesson was charged to when two packages cover the day', async () => {
+    const fs = fakeFirestore({
+      'lessons/L1': baseLesson({ participants: ['u1'] }),
+      'users/u1': { packages: overlappingPackages() },
+    });
+    await createBookingCore(fs.deps).leaveLesson({ lessonId: 'L1', userId: 'u1' });
+    const userWrite = fs.writes.find((w) => w.path === 'users/u1');
+    assert.equal(remainingIn(userWrite, 'new'), 4);
+    assert.equal(remainingIn(userWrite, 'old'), 1);
   });
 
   test('decrements the stored participant count when enabled', async () => {
@@ -259,6 +285,17 @@ describe('cancelLesson / deleteLesson', () => {
     assert.equal(lessonWrite.path, 'lessons/L1');
     assert.deepEqual(lessonWrite.data, { status: 'cancelled', cancelledBy: 'admin1' });
     assert.equal(fs.readAfterWrite, false);
+  });
+
+  test('cancelLesson refunds each participant to the package the lesson was charged to', async () => {
+    const fs = fakeFirestore({
+      'lessons/L1': baseLesson({ participants: ['u1'] }),
+      'users/u1': { packages: overlappingPackages() },
+    });
+    await createBookingCore(fs.deps).cancelLesson({ lessonId: 'L1', lessonUpdate: { status: 'cancelled' } });
+    const userWrite = fs.writes.find((w) => w.path === 'users/u1');
+    assert.equal(remainingIn(userWrite, 'new'), 4);
+    assert.equal(remainingIn(userWrite, 'old'), 1);
   });
 
   test('deleteLesson refunds and then deletes the lesson document', async () => {

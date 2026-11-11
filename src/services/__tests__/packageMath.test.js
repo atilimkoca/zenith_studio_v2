@@ -211,6 +211,20 @@ describe('planDeduction', () => {
     assert.equal(withExpired.totalRemaining, 6);
     assert.equal(withoutExpired.totalRemaining, 4);
   });
+
+  test('records the lesson id on the package the credit was taken from', () => {
+    const covering = makePackage({ id: 'A', remainingLessons: 5, chargedLessonIds: ['L0'] });
+    const later = makePackage({ id: 'B', remainingLessons: 3, startDate: new Date(2026, 9, 1).toISOString(), expiryDate: new Date(2026, 10, 1).toISOString() });
+    const plan = planDeduction({ packages: [covering, later] }, lessonDate, 'Ders', { now: NOW, lessonId: 'L1' });
+
+    assert.deepEqual(plan.updateData.packages.find((p) => p.id === 'A').chargedLessonIds, ['L0', 'L1']);
+    assert.equal('chargedLessonIds' in plan.updateData.packages.find((p) => p.id === 'B'), false);
+  });
+
+  test('adds no chargedLessonIds field when the caller passes no lesson id', () => {
+    const plan = planDeduction({ packages: [makePackage()] }, lessonDate, 'Ders', { now: NOW });
+    assert.equal('chargedLessonIds' in plan.updateData.packages[0], false);
+  });
 });
 
 describe('planRefund', () => {
@@ -261,5 +275,83 @@ describe('planRefund', () => {
     assert.equal(plan.updateData.packages.length, 1);
     assert.equal(plan.updateData.packages[0].remainingLessons, 3);
     assert.equal(plan.updateData['packageInfo.remainingClasses'], 3);
+  });
+
+  // A renewal often starts before the previous package expires, so two
+  // packages cover the same lesson day. The old one is usually used up.
+  const oldPackage = (overrides = {}) => makePackage({
+    id: 'old',
+    startDate: new Date(2026, 7, 15).toISOString(),
+    expiryDate: new Date(2026, 8, 15).toISOString(),
+    remainingLessons: 0,
+    ...overrides,
+  });
+  const newPackage = (overrides = {}) => makePackage({
+    id: 'new',
+    startDate: new Date(2026, 8, 5).toISOString(),
+    expiryDate: new Date(2026, 9, 5).toISOString(),
+    remainingLessons: 3,
+    ...overrides,
+  });
+  const remainingOf = (plan, id) => plan.updateData.packages.find((p) => p.id === id).remainingLessons;
+
+  test('refunds to the package the lesson was charged to, not to an older package covering the same day', () => {
+    const plan = planRefund(
+      { packages: [oldPackage(), newPackage({ chargedLessonIds: ['L9', 'L20'] })] },
+      lessonDate, 'Ders iptali', { now: NOW, lessonId: 'L20' },
+    );
+    assert.equal(plan.packageId, 'new');
+    assert.equal(remainingOf(plan, 'new'), 4);
+    assert.equal(remainingOf(plan, 'old'), 0);
+    assert.deepEqual(plan.updateData.packages.find((p) => p.id === 'new').chargedLessonIds, ['L9']);
+  });
+
+  test('a refund to the charged package is not capped by totalLessons (admin-added extras survive)', () => {
+    const plan = planRefund(
+      { packages: [makePackage({ totalLessons: 8, remainingLessons: 8, chargedLessonIds: ['L1'] })] },
+      lessonDate, 'Ders iptali', { now: NOW, lessonId: 'L1' },
+    );
+    assert.equal(plan.updateData.packages[0].remainingLessons, 9);
+  });
+
+  test('ignores a charge recorded on a package that has since been cancelled', () => {
+    const plan = planRefund(
+      { packages: [newPackage({ id: 'gone', status: 'cancelled', chargedLessonIds: ['L1'] }), newPackage()] },
+      lessonDate, 'Ders iptali', { now: NOW, lessonId: 'L1' },
+    );
+    assert.equal(plan.packageId, 'new');
+    assert.equal(remainingOf(plan, 'new'), 4);
+    assert.equal(remainingOf(plan, 'gone'), 3);
+  });
+
+  test('booking made before charges were recorded: refunds to the package a booking on that day would use', () => {
+    const plan = planRefund({ packages: [oldPackage(), newPackage()] }, lessonDate, 'Ders iptali', { now: NOW, lessonId: 'L20' });
+    assert.equal(plan.packageId, 'new');
+    assert.equal(remainingOf(plan, 'new'), 4);
+    assert.equal(remainingOf(plan, 'old'), 0);
+  });
+
+  test('booking made before charges were recorded: a full package is skipped for the last covering one with room', () => {
+    const plan = planRefund(
+      { packages: [oldPackage(), newPackage({ remainingLessons: 8, totalLessons: 8 })] },
+      lessonDate, 'Ders iptali', { now: NOW },
+    );
+    assert.equal(plan.packageId, 'old');
+    assert.equal(remainingOf(plan, 'old'), 1);
+    assert.equal(remainingOf(plan, 'new'), 8);
+  });
+
+  test('regression 2026-11-09: book the evening lesson, book the morning one, cancel the evening one', () => {
+    const opts = (lessonId) => ({ now: NOW, excludeExpired: true, lessonId });
+    let user = { packages: [oldPackage(), newPackage({ remainingLessons: 5 })] };
+
+    user = { ...user, ...planDeduction(user, lessonDate, '20:00', opts('L20')).updateData };
+    user = { ...user, ...planDeduction(user, lessonDate, '10:00', opts('L10')).updateData };
+    user = { ...user, ...planRefund(user, lessonDate, 'Ders iptali', opts('L20')).updateData };
+
+    const byId = Object.fromEntries(user.packages.map((p) => [p.id, p]));
+    assert.equal(byId.new.remainingLessons, 4);
+    assert.equal(byId.old.remainingLessons, 0);
+    assert.deepEqual(byId.new.chargedLessonIds, ['L10']);
   });
 });

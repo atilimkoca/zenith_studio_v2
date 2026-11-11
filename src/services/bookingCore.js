@@ -71,10 +71,12 @@ export const createBookingCore = ({
     return null;
   };
 
-  const planOptions = (current, timestamp) => ({
+  // `lessonId` lets the credit be returned to the package it was taken from.
+  const planOptions = (current, timestamp, lessonId) => ({
     now: current,
     excludeExpired,
     timestamp: timestamp || current.toISOString(),
+    lessonId,
   });
 
   const joinLesson = ({
@@ -113,7 +115,7 @@ export const createBookingCore = ({
       user.data,
       lesson.data.scheduledDate,
       resolveLessonInfo(lessonInfo, lesson.data),
-      planOptions(current, timestamp),
+      planOptions(current, timestamp, lessonId),
     );
     if (!plan.ok) {
       throw new BookingError(plan.code, plan.message, { noPackageForDate: plan.noPackageForDate === true });
@@ -160,7 +162,7 @@ export const createBookingCore = ({
         user.data,
         lesson.data.scheduledDate,
         resolveLessonInfo(lessonInfo, lesson.data),
-        planOptions(current, timestamp),
+        planOptions(current, timestamp, lessonId),
       )
       : null;
 
@@ -179,7 +181,7 @@ export const createBookingCore = ({
 
   // Refund every participant of a lesson (used by cancel and delete).
   // Reads all user documents before issuing any write.
-  const refundParticipants = async (tx, lesson, { lessonInfo, userExtra, timestamp, current }) => {
+  const refundParticipants = async (tx, lesson, { lessonId, lessonInfo, userExtra, timestamp, current }) => {
     const participantIds = [...new Set(participantsOf(lesson.data))];
     const lookups = [];
     for (const userId of participantIds) {
@@ -197,7 +199,7 @@ export const createBookingCore = ({
         user.data,
         lesson.data.scheduledDate,
         resolveLessonInfo(lessonInfo, lesson.data),
-        planOptions(current, timestamp),
+        planOptions(current, timestamp, lessonId),
       );
       tx.update(user.ref, { ...plan.updateData, ...userExtra });
       refunded.push({ userId, plan });
@@ -210,7 +212,7 @@ export const createBookingCore = ({
     runTransaction(db, async (tx) => {
       const current = now();
       const lesson = await readLesson(tx, lessonId);
-      const outcome = await refundParticipants(tx, lesson, { lessonInfo, userExtra, timestamp, current });
+      const outcome = await refundParticipants(tx, lesson, { lessonId, lessonInfo, userExtra, timestamp, current });
       tx.update(lesson.ref, lessonUpdate);
       return { lessonData: lesson.data, ...outcome };
     });
@@ -219,7 +221,7 @@ export const createBookingCore = ({
     runTransaction(db, async (tx) => {
       const current = now();
       const lesson = await readLesson(tx, lessonId);
-      const outcome = await refundParticipants(tx, lesson, { lessonInfo, userExtra, timestamp, current });
+      const outcome = await refundParticipants(tx, lesson, { lessonId, lessonInfo, userExtra, timestamp, current });
       tx.delete(lesson.ref);
       return { lessonData: lesson.data, ...outcome };
     });
